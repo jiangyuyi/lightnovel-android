@@ -1,6 +1,7 @@
 package io.github.jiangyuyi.lightnovel
 
 import android.os.Bundle
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.PaddingValues
@@ -29,6 +30,13 @@ import io.github.jiangyuyi.lightnovel.core.ui.viewModelFactory
 import io.github.jiangyuyi.lightnovel.feature.app.AppViewModel
 import io.github.jiangyuyi.lightnovel.feature.auth.AuthScreen
 import io.github.jiangyuyi.lightnovel.feature.auth.AuthViewModel
+import io.github.jiangyuyi.lightnovel.feature.account.HistoryScreen
+import io.github.jiangyuyi.lightnovel.feature.account.HistoryViewModel
+import io.github.jiangyuyi.lightnovel.feature.account.PublishingScreen
+import io.github.jiangyuyi.lightnovel.feature.account.PublishingViewModel
+import io.github.jiangyuyi.lightnovel.feature.account.SocialMode
+import io.github.jiangyuyi.lightnovel.feature.account.SocialScreen
+import io.github.jiangyuyi.lightnovel.feature.account.SocialViewModel
 import io.github.jiangyuyi.lightnovel.feature.book.BookScreen
 import io.github.jiangyuyi.lightnovel.feature.book.BookViewModel
 import io.github.jiangyuyi.lightnovel.feature.bookshelf.BookshelfScreen
@@ -36,6 +44,13 @@ import io.github.jiangyuyi.lightnovel.feature.bookshelf.BookshelfViewModel
 import io.github.jiangyuyi.lightnovel.feature.discover.DiscoverScreen
 import io.github.jiangyuyi.lightnovel.feature.discover.DiscoverViewModel
 import io.github.jiangyuyi.lightnovel.feature.profile.ProfileScreen
+import io.github.jiangyuyi.lightnovel.feature.profile.ProfileViewModel
+import io.github.jiangyuyi.lightnovel.feature.messages.DmThreadScreen
+import io.github.jiangyuyi.lightnovel.feature.messages.DmThreadViewModel
+import io.github.jiangyuyi.lightnovel.feature.messages.MessagesScreen
+import io.github.jiangyuyi.lightnovel.feature.messages.MessagesViewModel
+import io.github.jiangyuyi.lightnovel.core.model.UserSummary
+import io.github.jiangyuyi.lightnovel.core.model.DmConversation
 import io.github.jiangyuyi.lightnovel.feature.reader.ReaderScreen
 import io.github.jiangyuyi.lightnovel.feature.reader.ReaderViewModel
 import io.github.jiangyuyi.lightnovel.feature.search.SearchScreen
@@ -54,11 +69,19 @@ private object Routes {
     const val SEARCH = "search"
     const val PROFILE = "profile"
     const val AUTH = "auth"
+    const val SOCIAL = "social/{mode}"
+    const val HISTORY = "history"
+    const val PUBLISHING = "publishing"
+    const val MESSAGES = "messages"
+    const val DM_THREAD = "dm/{peerUid}/{nickname}"
     const val BOOK = "book/{bookId}"
     const val READER = "reader/{bookId}/{chapterId}"
 
     fun book(id: Long) = "book/$id"
     fun reader(bookId: Long, chapterId: Long) = "reader/$bookId/$chapterId"
+    fun social(mode: SocialMode) = "social/${mode.name.lowercase()}"
+    fun dm(conversation: DmConversation) =
+        "dm/${conversation.peerUid}/${Uri.encode(conversation.user.nickname)}"
 }
 
 private data class BottomDestination(val route: String, val label: String, val glyph: String)
@@ -120,11 +143,79 @@ private fun LightNovelApp() {
                 SearchScreen(vm) { navController.navigate(Routes.book(it)) }
             }
             composable(Routes.PROFILE) {
+                val vm: ProfileViewModel = viewModel(factory = viewModelFactory { ProfileViewModel(container.repository) })
                 ProfileScreen(
+                    viewModel = vm,
                     session = session,
                     onLogin = { navController.navigate(Routes.AUTH) },
                     onLogout = appViewModel::logout,
+                    onBookshelf = { navController.openRoot(Routes.BOOKSHELF) },
+                    onFollowing = { navController.navigate(Routes.social(SocialMode.FOLLOWING)) },
+                    onFollowers = { navController.navigate(Routes.social(SocialMode.FOLLOWERS)) },
+                    onHistory = { navController.navigate(Routes.HISTORY) },
+                    onPublishing = { navController.navigate(Routes.PUBLISHING) },
+                    onMessages = { navController.navigate(Routes.MESSAGES) },
                 )
+            }
+            composable(
+                Routes.SOCIAL,
+                arguments = listOf(navArgument("mode") { type = NavType.StringType }),
+            ) { entry ->
+                val initialMode = if (entry.arguments?.getString("mode") == "followers") {
+                    SocialMode.FOLLOWERS
+                } else SocialMode.FOLLOWING
+                val vm: SocialViewModel = viewModel(
+                    key = "social-${initialMode.name}",
+                    factory = viewModelFactory { SocialViewModel(container.repository, initialMode) },
+                )
+                SocialScreen(vm, onBack = { navController.popBackStack() })
+            }
+            composable(Routes.HISTORY) {
+                val vm: HistoryViewModel = viewModel(factory = viewModelFactory { HistoryViewModel(container.repository) })
+                HistoryScreen(
+                    vm,
+                    onBack = { navController.popBackStack() },
+                    onOpen = { bookId, chapterId ->
+                        navController.navigate(chapterId?.let { Routes.reader(bookId, it) } ?: Routes.book(bookId))
+                    },
+                )
+            }
+            composable(Routes.PUBLISHING) {
+                val vm: PublishingViewModel = viewModel(factory = viewModelFactory { PublishingViewModel(container.repository) })
+                PublishingScreen(
+                    vm,
+                    onBack = { navController.popBackStack() },
+                    onBook = { navController.navigate(Routes.book(it)) },
+                )
+            }
+            composable(Routes.MESSAGES) {
+                val vm: MessagesViewModel = viewModel(factory = viewModelFactory {
+                    MessagesViewModel(container.repository)
+                })
+                MessagesScreen(
+                    vm,
+                    onBack = { navController.popBackStack() },
+                    onConversation = { navController.navigate(Routes.dm(it)) },
+                    onTarget = { bookId, chapterId ->
+                        navController.navigate(chapterId?.let { Routes.reader(bookId, it) } ?: Routes.book(bookId))
+                    },
+                )
+            }
+            composable(
+                Routes.DM_THREAD,
+                arguments = listOf(
+                    navArgument("peerUid") { type = NavType.LongType },
+                    navArgument("nickname") { type = NavType.StringType },
+                ),
+            ) { entry ->
+                val peerUid = entry.arguments?.getLong("peerUid") ?: return@composable
+                val nickname = entry.arguments?.getString("nickname").orEmpty().ifBlank { "用户$peerUid" }
+                val peer = UserSummary(peerUid, nickname)
+                val vm: DmThreadViewModel = viewModel(
+                    key = "dm-$peerUid",
+                    factory = viewModelFactory { DmThreadViewModel(peer, container.repository) },
+                )
+                DmThreadScreen(peer, vm, onBack = { navController.popBackStack() })
             }
             composable(Routes.AUTH) {
                 val vm: AuthViewModel = viewModel(factory = viewModelFactory { AuthViewModel(container.repository) })
