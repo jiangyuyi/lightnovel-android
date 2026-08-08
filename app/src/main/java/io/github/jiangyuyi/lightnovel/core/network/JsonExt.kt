@@ -407,6 +407,7 @@ object ApiParsers {
         val peerUid = item.long("peer_uid").takeIf { it > 0 } ?: user.uid.takeIf { it > 0 }
             ?: return@mapNotNull null
         val id = item.string("conversation_id", "thread_id", "id").ifBlank { "peer-$peerUid" }
+        val lastMessage = item.obj("last_message", "latest_message", "lastMessage", "last_message_info")
         DmConversation(
             id = id,
             peerUid = peerUid,
@@ -418,9 +419,13 @@ object ApiParsers {
                 "summary",
                 "content",
                 "content_text",
-            ),
+            ).ifBlank {
+                lastMessage?.string("content", "content_text", "body", "text", "message").orEmpty()
+            },
             unreadCount = item.int("unread_count", "unreadCount", "unread"),
-            updatedAt = item.string("updated_at", "updatedAt", "last_message_at", "time"),
+            updatedAt = item.string("updated_at", "updatedAt", "last_message_at", "time").ifBlank {
+                lastMessage?.string("created_at", "createdAt", "sent_at", "time").orEmpty()
+            },
             canSend = item.bool("can_send", "canSend") ?: false,
             denyReason = item.string("deny_reason", "denyReason", "dm_disabled_reason"),
         )

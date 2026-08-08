@@ -163,7 +163,7 @@ private fun ConversationCard(conversation: DmConversation, onClick: () -> Unit) 
                     }
                 }
                 Text(
-                    conversation.lastMessage.ifBlank { "暂无消息摘要" },
+                    conversation.lastMessage.ifBlank { "点击查看会话" },
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall,

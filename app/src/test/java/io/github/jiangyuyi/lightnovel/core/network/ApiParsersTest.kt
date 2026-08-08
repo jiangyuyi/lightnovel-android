@@ -346,9 +346,11 @@ class ApiParsersTest {
                 "conversation_id": "c-1",
                 "peer_uid": 9,
                 "peer_user": {"uid": 9, "nickname": "私信用户"},
-                "last_message_text": "你好",
-                "unread_count": 2,
-                "last_message_at": "今天"
+                "last_message": {
+                  "content": "你好",
+                  "created_at": "今天"
+                },
+                "unread_count": 2
               }]
             }
             """.trimIndent(),
@@ -371,6 +373,8 @@ class ApiParsersTest {
         val message = ApiParsers.dmMessages(messagesSource, UserSummary(9, "私信用户")).single()
         assertEquals(9L, conversation.peerUid)
         assertEquals(2, conversation.unreadCount)
+        assertEquals("你好", conversation.lastMessage)
+        assertEquals("今天", conversation.updatedAt)
         assertEquals("测试私信", message.content)
         assertFalse(message.mine)
     }
