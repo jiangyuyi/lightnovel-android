@@ -119,8 +119,21 @@ jobs:
           if gh release view "$VERSION_TAG" >/dev/null 2>&1; then
             gh release upload "$VERSION_TAG" "$APK_FILE" "$APK_FILE.sha256" --clobber
           else
-            gh release create "$VERSION_TAG" "$APK_FILE" "$APK_FILE.sha256" \
-              --target "$GITHUB_SHA" \
-              --title "LightNovel ${VERSION_TAG#v}" \
-              --generate-notes
+            version="${VERSION_TAG#v}"
+            awk -v heading="## [$version]" '
+              index($0, heading) == 1 { capture = 1; next }
+              capture && /^## \[/ { exit }
+              capture { print }
+            ' CHANGELOG.md > release-notes.md
+            if [[ -s release-notes.md ]]; then
+              gh release create "$VERSION_TAG" "$APK_FILE" "$APK_FILE.sha256" \
+                --target "$GITHUB_SHA" \
+                --title "LightNovel $version" \
+                --notes-file release-notes.md
+            else
+              gh release create "$VERSION_TAG" "$APK_FILE" "$APK_FILE.sha256" \
+                --target "$GITHUB_SHA" \
+                --title "LightNovel $version" \
+                --generate-notes
+            fi
           fi
