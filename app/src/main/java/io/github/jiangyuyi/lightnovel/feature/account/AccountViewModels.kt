@@ -9,6 +9,7 @@ import io.github.jiangyuyi.lightnovel.core.model.SocialUser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 
 enum class SocialMode(val label: String) { FOLLOWING("关注"), FOLLOWERS("粉丝") }
@@ -20,10 +21,13 @@ data class SocialState(
     val total: Int = 0,
     val hasMore: Boolean = false,
     val loading: Boolean = false,
+    val refreshing: Boolean = false,
     val loadingMore: Boolean = false,
     val pendingUsers: Set<Long> = emptySet(),
     val error: String? = null,
+    val refreshError: String? = null,
     val actionError: String? = null,
+    val lastUpdatedAt: Long? = null,
 )
 
 class SocialViewModel(
@@ -33,20 +37,20 @@ class SocialViewModel(
     private val _state = MutableStateFlow(SocialState(mode = initialMode))
     val state: StateFlow<SocialState> = _state.asStateFlow()
 
-    init { refresh() }
+    init { load(page = 1, append = false, forceRefresh = false) }
 
     fun select(mode: SocialMode) {
         if (_state.value.mode == mode && _state.value.items.isNotEmpty()) return
         _state.value = SocialState(mode = mode)
-        refresh()
+        load(page = 1, append = false, forceRefresh = false)
     }
 
-    fun refresh() = load(page = 1, append = false)
+    fun refresh() = load(page = 1, append = false, forceRefresh = true)
 
     fun loadMore() {
         val current = _state.value
         if (current.hasMore && !current.loading && !current.loadingMore) {
-            load(current.page + 1, append = true)
+            load(current.page + 1, append = true, forceRefresh = false)
         }
     }
 
@@ -86,39 +90,53 @@ class SocialViewModel(
         }
     }
 
-    private fun load(page: Int, append: Boolean) {
+    private fun load(page: Int, append: Boolean, forceRefresh: Boolean) {
         val current = _state.value
-        if (current.loading || current.loadingMore) return
+        if (current.loading || current.loadingMore || current.refreshing) return
+        val hasContent = current.items.isNotEmpty()
         _state.value = current.copy(
-            loading = !append,
+            loading = !append && !hasContent,
+            refreshing = !append && hasContent && forceRefresh,
             loadingMore = append,
             error = null,
+            refreshError = null,
             actionError = null,
         )
         viewModelScope.launch {
             val mode = _state.value.mode
-            runCatching {
-                if (mode == SocialMode.FOLLOWING) repository.following(page) else repository.followers(page)
-            }.onSuccess { result ->
+            val updates = if (mode == SocialMode.FOLLOWING) {
+                repository.followingUpdates(page, forceRefresh = forceRefresh)
+            } else {
+                repository.followersUpdates(page, forceRefresh = forceRefresh)
+            }
+            updates.catch { throwable ->
                 val latest = _state.value
-                if (latest.mode != mode) return@onSuccess
+                if (latest.mode == mode) {
+                    val message = throwable.message ?: "用户列表加载失败"
+                    _state.value = latest.copy(
+                        loading = false,
+                        refreshing = false,
+                        loadingMore = false,
+                        error = message.takeIf { latest.items.isEmpty() },
+                        refreshError = message.takeIf { latest.items.isNotEmpty() },
+                    )
+                }
+            }.collect { update ->
+                val latest = _state.value
+                if (latest.mode != mode) return@collect
+                val result = update.data
                 _state.value = latest.copy(
                     items = if (append) (latest.items + result.items).distinctBy { it.user.uid } else result.items,
                     page = result.page,
                     total = result.total,
                     hasMore = result.hasMore,
                     loading = false,
+                    refreshing = update.refreshing,
                     loadingMore = false,
+                    error = null,
+                    refreshError = update.error?.message,
+                    lastUpdatedAt = update.savedAtMillis,
                 )
-            }.onFailure {
-                val latest = _state.value
-                if (latest.mode == mode) {
-                    _state.value = latest.copy(
-                        loading = false,
-                        loadingMore = false,
-                        error = it.message ?: "用户列表加载失败",
-                    )
-                }
             }
         }
     }
@@ -130,23 +148,28 @@ data class HistoryState(
     val total: Int = 0,
     val hasMore: Boolean = false,
     val loading: Boolean = false,
+    val refreshing: Boolean = false,
     val loadingMore: Boolean = false,
     val deleting: Set<Long> = emptySet(),
     val error: String? = null,
+    val refreshError: String? = null,
     val actionError: String? = null,
+    val lastUpdatedAt: Long? = null,
 )
 
 class HistoryViewModel(private val repository: LightNovelRepository) : ViewModel() {
     private val _state = MutableStateFlow(HistoryState())
     val state: StateFlow<HistoryState> = _state.asStateFlow()
 
-    init { refresh() }
+    init { load(1, false, false) }
 
-    fun refresh() = load(1, false)
+    fun refresh() = load(1, false, true)
 
     fun loadMore() {
         val current = _state.value
-        if (current.hasMore && !current.loading && !current.loadingMore) load(current.page + 1, true)
+        if (current.hasMore && !current.loading && !current.loadingMore && !current.refreshing) {
+            load(current.page + 1, true, false)
+        }
     }
 
     fun delete(item: ReadingHistoryItem) {
@@ -173,28 +196,45 @@ class HistoryViewModel(private val repository: LightNovelRepository) : ViewModel
         }
     }
 
-    private fun load(page: Int, append: Boolean) {
+    private fun load(page: Int, append: Boolean, forceRefresh: Boolean) {
         val current = _state.value
-        if (current.loading || current.loadingMore) return
-        _state.value = current.copy(loading = !append, loadingMore = append, error = null, actionError = null)
+        if (current.loading || current.loadingMore || current.refreshing) return
+        val hasContent = current.items.isNotEmpty()
+        _state.value = current.copy(
+            loading = !append && !hasContent,
+            refreshing = !append && hasContent && forceRefresh,
+            loadingMore = append,
+            error = null,
+            refreshError = null,
+            actionError = null,
+        )
         viewModelScope.launch {
-            runCatching { repository.readingHistory(page) }
-                .onSuccess { result ->
+            repository.readingHistoryUpdates(page, forceRefresh = forceRefresh)
+                .catch { throwable ->
                     val latest = _state.value
+                    val message = throwable.message ?: "阅读记录加载失败"
+                    _state.value = latest.copy(
+                        loading = false,
+                        refreshing = false,
+                        loadingMore = false,
+                        error = message.takeIf { latest.items.isEmpty() },
+                        refreshError = message.takeIf { latest.items.isNotEmpty() },
+                    )
+                }
+                .collect { update ->
+                    val latest = _state.value
+                    val result = update.data
                     _state.value = latest.copy(
                         items = if (append) (latest.items + result.items).distinctBy { it.book.id } else result.items,
                         page = result.page,
                         total = result.total,
                         hasMore = result.hasMore,
                         loading = false,
+                        refreshing = update.refreshing,
                         loadingMore = false,
-                    )
-                }
-                .onFailure {
-                    _state.value = _state.value.copy(
-                        loading = false,
-                        loadingMore = false,
-                        error = it.message ?: "阅读记录加载失败",
+                        error = null,
+                        refreshError = update.error?.message,
+                        lastUpdatedAt = update.savedAtMillis,
                     )
                 }
         }
@@ -207,45 +247,66 @@ data class PublishingState(
     val total: Int = 0,
     val hasMore: Boolean = false,
     val loading: Boolean = false,
+    val refreshing: Boolean = false,
     val loadingMore: Boolean = false,
     val error: String? = null,
+    val refreshError: String? = null,
+    val lastUpdatedAt: Long? = null,
 )
 
 class PublishingViewModel(private val repository: LightNovelRepository) : ViewModel() {
     private val _state = MutableStateFlow(PublishingState())
     val state: StateFlow<PublishingState> = _state.asStateFlow()
 
-    init { refresh() }
+    init { load(1, false, false) }
 
-    fun refresh() = load(1, false)
+    fun refresh() = load(1, false, true)
 
     fun loadMore() {
         val current = _state.value
-        if (current.hasMore && !current.loading && !current.loadingMore) load(current.page + 1, true)
+        if (current.hasMore && !current.loading && !current.loadingMore && !current.refreshing) {
+            load(current.page + 1, true, false)
+        }
     }
 
-    private fun load(page: Int, append: Boolean) {
+    private fun load(page: Int, append: Boolean, forceRefresh: Boolean) {
         val current = _state.value
-        if (current.loading || current.loadingMore) return
-        _state.value = current.copy(loading = !append, loadingMore = append, error = null)
+        if (current.loading || current.loadingMore || current.refreshing) return
+        val hasContent = current.items.isNotEmpty()
+        _state.value = current.copy(
+            loading = !append && !hasContent,
+            refreshing = !append && hasContent && forceRefresh,
+            loadingMore = append,
+            error = null,
+            refreshError = null,
+        )
         viewModelScope.launch {
-            runCatching { repository.publishedWorks(page) }
-                .onSuccess { result ->
+            repository.publishedWorksUpdates(page, forceRefresh = forceRefresh)
+                .catch { throwable ->
                     val latest = _state.value
+                    val message = throwable.message ?: "发布管理加载失败"
+                    _state.value = latest.copy(
+                        loading = false,
+                        refreshing = false,
+                        loadingMore = false,
+                        error = message.takeIf { latest.items.isEmpty() },
+                        refreshError = message.takeIf { latest.items.isNotEmpty() },
+                    )
+                }
+                .collect { update ->
+                    val latest = _state.value
+                    val result = update.data
                     _state.value = latest.copy(
                         items = if (append) (latest.items + result.items).distinctBy { it.bookId } else result.items,
                         page = result.page,
                         total = result.total,
                         hasMore = result.hasMore,
                         loading = false,
+                        refreshing = update.refreshing,
                         loadingMore = false,
-                    )
-                }
-                .onFailure {
-                    _state.value = _state.value.copy(
-                        loading = false,
-                        loadingMore = false,
-                        error = it.message ?: "发布管理加载失败",
+                        error = null,
+                        refreshError = update.error?.message,
+                        lastUpdatedAt = update.savedAtMillis,
                     )
                 }
         }

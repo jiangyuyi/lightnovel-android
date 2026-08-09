@@ -1,5 +1,9 @@
 package io.github.jiangyuyi.lightnovel.core.data
 
+import io.github.jiangyuyi.lightnovel.core.cache.CachePolicies
+import io.github.jiangyuyi.lightnovel.core.cache.CacheScopes
+import io.github.jiangyuyi.lightnovel.core.cache.CacheUpdate
+import io.github.jiangyuyi.lightnovel.core.cache.CachedDataSource
 import io.github.jiangyuyi.lightnovel.core.model.BookDetail
 import io.github.jiangyuyi.lightnovel.core.model.BookSummary
 import io.github.jiangyuyi.lightnovel.core.model.AccountProfile
@@ -32,15 +36,19 @@ import io.github.jiangyuyi.lightnovel.core.network.long
 import io.github.jiangyuyi.lightnovel.core.network.obj
 import io.github.jiangyuyi.lightnovel.core.network.string
 import io.github.jiangyuyi.lightnovel.core.session.SessionStore
+import java.security.MessageDigest
+import java.util.UUID
+import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.math.roundToInt
-import java.util.UUID
 
 class LightNovelRepository(
     private val api: LightNovelApi,
     private val sessionStore: SessionStore,
+    private val cache: CachedDataSource,
 ) {
     val session = sessionStore.session
 
@@ -90,7 +98,225 @@ class LightNovelRepository(
         return parseAndSaveSession(data)
     }
 
-    fun logout() = sessionStore.clear()
+    suspend fun logout() {
+        try {
+            cache.clearPrivate()
+        } finally {
+            sessionStore.clear()
+        }
+    }
+
+    fun discoverUpdates(
+        channel: DiscoverChannel,
+        page: Int = 1,
+        pageSize: Int = 20,
+        forceRefresh: Boolean = false,
+    ): Flow<CacheUpdate<Page<BookSummary>>> = cache.updates(
+        scope = currentScope(),
+        key = cacheKey("discover", channel.name, page, pageSize),
+        policy = CachePolicies.DISCOVER,
+        serializer = Page.serializer(BookSummary.serializer()),
+        forceRefresh = forceRefresh,
+    ) { discover(channel, page, pageSize) }
+
+    fun taxonomyUpdates(forceRefresh: Boolean = false): Flow<CacheUpdate<SearchTaxonomy>> = cache.updates(
+        scope = CacheScopes.PUBLIC,
+        key = cacheKey("taxonomy"),
+        policy = CachePolicies.TAXONOMY,
+        serializer = SearchTaxonomy.serializer(),
+        forceRefresh = forceRefresh,
+        fetch = ::taxonomy,
+    )
+
+    fun searchUpdates(
+        query: String,
+        workType: String = "",
+        primaryTag: String = "",
+        page: Int = 1,
+        pageSize: Int = 20,
+        forceRefresh: Boolean = false,
+    ): Flow<CacheUpdate<Page<BookSummary>>> = cache.updates(
+        scope = currentScope(),
+        key = cacheKey("search", query.trim(), workType, primaryTag, page, pageSize),
+        policy = CachePolicies.SEARCH,
+        serializer = Page.serializer(BookSummary.serializer()),
+        forceRefresh = forceRefresh,
+    ) { search(query, workType, primaryTag, page, pageSize) }
+
+    fun bookDetailUpdates(
+        bookId: Long,
+        forceRefresh: Boolean = false,
+    ): Flow<CacheUpdate<BookDetail>> = cache.updates(
+        scope = currentScope(),
+        key = cacheKey("book", bookId),
+        policy = CachePolicies.BOOK,
+        serializer = BookDetail.serializer(),
+        forceRefresh = forceRefresh,
+    ) { bookDetail(bookId) }
+
+    fun readerBootstrapUpdates(
+        bookId: Long,
+        forceRefresh: Boolean = false,
+    ): Flow<CacheUpdate<ReaderBootstrap>> = cache.updates(
+        scope = currentScope(),
+        key = cacheKey("reader-bootstrap", bookId),
+        policy = CachePolicies.BOOK,
+        serializer = ReaderBootstrap.serializer(),
+        forceRefresh = forceRefresh,
+    ) { readerBootstrap(bookId) }
+
+    fun volumesUpdates(
+        bookId: Long,
+        page: Int = 1,
+        pageSize: Int = 50,
+        forceRefresh: Boolean = false,
+    ): Flow<CacheUpdate<Page<Volume>>> = cache.updates(
+        scope = CacheScopes.PUBLIC,
+        key = cacheKey("volumes", bookId, page, pageSize),
+        policy = CachePolicies.BOOK,
+        serializer = Page.serializer(Volume.serializer()),
+        forceRefresh = forceRefresh,
+    ) { volumes(bookId, page, pageSize) }
+
+    fun chaptersUpdates(
+        bookId: Long,
+        volumeId: Long,
+        page: Int = 1,
+        pageSize: Int = 50,
+        forceRefresh: Boolean = false,
+    ): Flow<CacheUpdate<Page<ChapterSummary>>> = cache.updates(
+        scope = CacheScopes.PUBLIC,
+        key = cacheKey("chapters", bookId, volumeId, page, pageSize),
+        policy = CachePolicies.BOOK,
+        serializer = Page.serializer(ChapterSummary.serializer()),
+        forceRefresh = forceRefresh,
+    ) { chapters(bookId, volumeId, page, pageSize) }
+
+    fun chapterUpdates(
+        bookId: Long,
+        chapterId: Long,
+        forceRefresh: Boolean = false,
+    ): Flow<CacheUpdate<ChapterDetail>> = cache.updates(
+        scope = CacheScopes.PUBLIC,
+        key = cacheKey("chapter", bookId, chapterId),
+        policy = CachePolicies.CHAPTER,
+        serializer = ChapterDetail.serializer(),
+        forceRefresh = forceRefresh,
+    ) { chapter(bookId, chapterId) }
+
+    fun bookshelfUpdates(forceRefresh: Boolean = false): Flow<CacheUpdate<List<BookSummary>>> = cache.updates(
+        scope = userScope(),
+        key = cacheKey("bookshelf"),
+        policy = CachePolicies.USER_FAST,
+        serializer = ListSerializer(BookSummary.serializer()),
+        forceRefresh = forceRefresh,
+        fetch = ::bookshelf,
+    )
+
+    fun profileUpdates(forceRefresh: Boolean = false): Flow<CacheUpdate<AccountProfile>> = cache.updates(
+        scope = userScope(),
+        key = cacheKey("profile"),
+        policy = CachePolicies.USER,
+        serializer = AccountProfile.serializer(),
+        forceRefresh = forceRefresh,
+        fetch = ::myProfile,
+    )
+
+    fun followingUpdates(
+        page: Int = 1,
+        pageSize: Int = 20,
+        forceRefresh: Boolean = false,
+    ): Flow<CacheUpdate<Page<SocialUser>>> = socialUpdates("following", page, pageSize, forceRefresh) {
+        following(page, pageSize)
+    }
+
+    fun followersUpdates(
+        page: Int = 1,
+        pageSize: Int = 20,
+        forceRefresh: Boolean = false,
+    ): Flow<CacheUpdate<Page<SocialUser>>> = socialUpdates("followers", page, pageSize, forceRefresh) {
+        followers(page, pageSize)
+    }
+
+    fun readingHistoryUpdates(
+        page: Int = 1,
+        pageSize: Int = 20,
+        forceRefresh: Boolean = false,
+    ): Flow<CacheUpdate<Page<ReadingHistoryItem>>> = cache.updates(
+        scope = userScope(),
+        key = cacheKey("history", page, pageSize),
+        policy = CachePolicies.USER_FAST,
+        serializer = Page.serializer(ReadingHistoryItem.serializer()),
+        forceRefresh = forceRefresh,
+    ) { readingHistory(page, pageSize) }
+
+    fun publishedWorksUpdates(
+        page: Int = 1,
+        pageSize: Int = 20,
+        forceRefresh: Boolean = false,
+    ): Flow<CacheUpdate<Page<PublishedWork>>> = cache.updates(
+        scope = userScope(),
+        key = cacheKey("publishing", page, pageSize),
+        policy = CachePolicies.USER,
+        serializer = Page.serializer(PublishedWork.serializer()),
+        forceRefresh = forceRefresh,
+    ) { publishedWorks(page, pageSize) }
+
+    fun messageSummaryUpdates(forceRefresh: Boolean = false): Flow<CacheUpdate<MessageSummary>> = cache.updates(
+        scope = userScope(),
+        key = cacheKey("message-summary"),
+        policy = CachePolicies.MESSAGE,
+        serializer = MessageSummary.serializer(),
+        forceRefresh = forceRefresh,
+        fetch = ::messageSummary,
+    )
+
+    fun messagesUpdates(
+        category: MessageCategory,
+        page: Int = 1,
+        pageSize: Int = 20,
+        forceRefresh: Boolean = false,
+    ): Flow<CacheUpdate<Page<NotificationMessage>>> = cache.updates(
+        scope = userScope(),
+        key = cacheKey("messages", category.name, page, pageSize),
+        policy = CachePolicies.MESSAGE,
+        serializer = Page.serializer(NotificationMessage.serializer()),
+        forceRefresh = forceRefresh,
+    ) { messages(category, page, pageSize) }
+
+    fun dmConversationsUpdates(forceRefresh: Boolean = false): Flow<CacheUpdate<List<DmConversation>>> = cache.updates(
+        scope = userScope(),
+        key = cacheKey("dm-conversations"),
+        policy = CachePolicies.MESSAGE,
+        serializer = ListSerializer(DmConversation.serializer()),
+        forceRefresh = forceRefresh,
+        fetch = ::dmConversations,
+    )
+
+    fun dmMessagesUpdates(
+        peerUid: Long,
+        peer: UserSummary,
+        forceRefresh: Boolean = false,
+    ): Flow<CacheUpdate<List<DmMessage>>> = cache.updates(
+        scope = userScope(),
+        key = cacheKey("dm-messages", peerUid),
+        policy = CachePolicies.MESSAGE,
+        serializer = ListSerializer(DmMessage.serializer()),
+        forceRefresh = forceRefresh,
+    ) { dmMessages(peerUid, peer) }
+
+    fun commentsUpdates(
+        bookId: Long,
+        page: Int = 1,
+        pageSize: Int = 20,
+        forceRefresh: Boolean = false,
+    ): Flow<CacheUpdate<Page<Comment>>> = cache.updates(
+        scope = currentScope(),
+        key = cacheKey("comments", bookId, page, pageSize),
+        policy = CachePolicies.BOOK,
+        serializer = Page.serializer(Comment.serializer()),
+        forceRefresh = forceRefresh,
+    ) { comments(bookId, page, pageSize) }
 
     suspend fun discover(channel: DiscoverChannel, page: Int = 1, pageSize: Int = 20): Page<BookSummary> {
         if (channel == DiscoverChannel.NEW) return rank("daily_fresh", page, pageSize)
@@ -324,6 +550,8 @@ class LightNovelRepository(
                 "act" to if (follow) "follow" else "unfollow",
             ),
         )
+        cache.removePrefix(userScope(), cachePrefix("social"))
+        cache.removePrefix(userScope(), cachePrefix("profile"))
         return follow
     }
 
@@ -342,6 +570,7 @@ class LightNovelRepository(
             "api/new-content-read/delete-book-history",
             jsonBody("security_key" to key, "book_id" to bookId),
         )
+        cache.removePrefix(userScope(), cachePrefix("history"))
     }
 
     suspend fun publishedWorks(page: Int = 1, pageSize: Int = 20): Page<PublishedWork> {
@@ -418,6 +647,9 @@ class LightNovelRepository(
                 jsonBody(*common, "scope" to "category", "category" to category.code),
             )
         }
+        cache.removePrefix(userScope(), cachePrefix("message-summary"))
+        cache.removePrefix(userScope(), cachePrefix("messages"))
+        cache.removePrefix(userScope(), cachePrefix("dm-conversations"))
     }
 
     suspend fun isInBookshelf(bookId: Long): Boolean {
@@ -441,7 +673,14 @@ class LightNovelRepository(
                 "source" to "pc_web",
             ),
         )
-        return isInBookshelf(bookId)
+        val result = isInBookshelf(bookId)
+        val scope = userScope()
+        cache.removePrefix(scope, cachePrefix("bookshelf"))
+        cache.removePrefix(scope, cachePrefix("book"))
+        cache.removePrefix(scope, cachePrefix("reader-bootstrap"))
+        cache.removePrefix(scope, cachePrefix("discover"))
+        cache.removePrefix(scope, cachePrefix("search"))
+        return result
     }
 
     suspend fun saveReadingProgress(
@@ -465,6 +704,7 @@ class LightNovelRepository(
                 "read_finished" to if (percent >= 98) 1 else 0,
             ),
         )
+        cache.removePrefix(userScope(), cachePrefix("history"))
     }
 
     suspend fun saveReaderSettings(preferences: ReaderPreferences) {
@@ -526,6 +766,36 @@ class LightNovelRepository(
     }
 
     private fun requireSession(): String = sessionStore.securityKey().ifBlank { error("请先登录") }
+
+    private fun currentScope(): String = if (sessionStore.session.value.loggedIn) userScope() else CacheScopes.PUBLIC
+
+    private fun userScope(): String = CacheScopes.user(sessionStore.session.value.uid)
+
+    private fun socialUpdates(
+        type: String,
+        page: Int,
+        pageSize: Int,
+        forceRefresh: Boolean,
+        fetch: suspend () -> Page<SocialUser>,
+    ): Flow<CacheUpdate<Page<SocialUser>>> = cache.updates(
+        scope = userScope(),
+        key = cacheKey("social", type, page, pageSize),
+        policy = CachePolicies.USER,
+        serializer = Page.serializer(SocialUser.serializer()),
+        forceRefresh = forceRefresh,
+        fetch = fetch,
+    )
+
+    private fun cachePrefix(namespace: String): String = "v1:$namespace:"
+
+    private fun cacheKey(namespace: String, vararg parts: Any): String {
+        val normalized = parts.joinToString("\u001f") { it.toString() }
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(normalized.toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte -> "%02x".format(byte) }
+            .take(24)
+        return "${cachePrefix(namespace)}$digest"
+    }
 
     private fun withOptionalSession(vararg pairs: Pair<String, Any?>): JsonObject {
         val token = sessionStore.securityKey()

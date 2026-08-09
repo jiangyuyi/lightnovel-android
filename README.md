@@ -24,6 +24,7 @@
 - 消息中心：私信、回复、@我、点赞、新粉丝、系统六类通知、未读徽标、分类分页与显式标为已读。
 - 私信会话与只读消息线程；本版本不会自动标记已读，也不会发送私信。
 - 正文阅读、上一章/下一章、目录返回、阅读进度保存。
+- 两级内容缓存与稳定后台刷新：页面往返优先显示已有内容，刷新不清空列表；在线读过的章节正文可离线打开。
 - 默认按屏幕自动排版并左右翻页，支持点击左右区域或横向滑动；也可切回上下滚动。
 - 按原站 `body_html` 解析正文插图，将 `[res]...[/res]` 对应为真实图片并按正文顺序展示。
 - 无衬线/衬线/等宽字体，14–32sp 字号、行高、页边距和白色/米黄/护眼绿/深色背景。
@@ -32,7 +33,7 @@
 
 网站的独立“合集”分区目前标记为维护中。本客户端按实际可用的数据实现“书籍 → 分卷 → 章节”三级目录，并展示 `alternate_versions`；合集页会显示维护说明，不调用猜测接口。
 
-完整的 API 调研、合集/评论评估、架构与验收计划见 [实施计划](docs/IMPLEMENTATION_PLAN.md)；账户功能和 1.2.0 消息中心设计见 [账户与消息计划](docs/ACCOUNT_AND_MESSAGES_PLAN.md)。版本变更见 [CHANGELOG](CHANGELOG.md)。
+完整的 API 调研、合集/评论评估、架构与验收计划见 [实施计划](docs/IMPLEMENTATION_PLAN.md)；账户功能和 1.2.0 消息中心设计见 [账户与消息计划](docs/ACCOUNT_AND_MESSAGES_PLAN.md)；1.3.0 缓存策略见 [缓存与稳定刷新计划](docs/CACHE_AND_REFRESH_PLAN.md)。版本变更见 [CHANGELOG](CHANGELOG.md)。
 
 ## 截图
 
@@ -101,8 +102,8 @@ app/build/outputs/apk/release/app-release.apk
 `.github/workflows/release.yml` 会在推送 `v*` 标签时执行测试、Lint、签名构建、`apksigner` 验证，并发布 APK 与 SHA-256 校验文件：
 
 ```powershell
-git tag v1.2.0
-git push origin v1.2.0
+git tag v1.3.0
+git push origin v1.3.0
 ```
 
 也可以在 GitHub Actions 页面手动运行 `Android Release` 并填写版本标签。
@@ -115,6 +116,7 @@ git push origin v1.2.0
 - `assembleRelease`：使用独立 Release 密钥签名，并通过 `apksigner verify`。
 - 小米 Android 16 真机已验证：首页/分区、图片加载、书籍详情、分卷章节、分页正文、点击/滑动翻页、上下滚动兼容模式、字体字号与背景设置、用户手动登录、进程重启后的会话恢复、书架、个人概览、3 个关注、0 粉丝空状态、多条阅读记录及 0 个发布作品空状态。
 - 1.2.0 消息中心真机验证：六类入口均可用；回复、@我、点赞、新粉丝正确显示空状态；系统通知加载 3 条历史记录；现有私信会话与只读线程成功加载。测试未执行标为已读或发送操作。
+- 1.3.0 缓存真机验证：覆盖安装保留登录态；发现页和书架在进程重启后直接恢复缓存；书架后台刷新时旧列表保持可见；关闭 Wi-Fi/移动数据后仍可经缓存详情进入已读章节并显示完整 27 页正文。
 - 密码由用户在手机上手动输入；测试过程未读取、记录或保存密码。临时加入的测试书籍已移出，书架恢复原状。
 
 ## API 与隐私
@@ -126,7 +128,7 @@ git push origin v1.2.0
 
 站点没有为本项目提供稳定 SDK，因此 API 可能变化。API 与站点图片统一使用嵌入式 Cronet，优先建立 HTTP/3/QUIC 连接；遇到大陆网络上的可重试连接重置时会重建引擎并轮换备用 CDN 边缘地址。网络层同时集中处理响应信封、历史字段兼容和错误映射。Debug/Release 均不会记录密码、验证码或 `security_key`。
 
-正文只用于当前阅读页面，不随 Git 提交，也不提供整本离线导出。游客阅读设置和位置保存在 DataStore；登录用户的书架、阅读进度和阅读设置会按站点 API 同步。
+正文只缓存在当前设备供连续阅读，不随 Git 提交，也不提供整本离线导出。章节正文默认缓存 7 天，并与其他磁盘内容共同受 96 MiB LRU 上限约束。游客阅读设置和位置保存在 DataStore；登录用户的书架、阅读进度和阅读设置会按站点 API 同步。密码、验证码和 `security_key` 不进入内容缓存，退出登录会清理按 UID 隔离的私有缓存。
 
 ## 工程结构
 
@@ -134,6 +136,7 @@ git push origin v1.2.0
 app/src/main/java/io/github/jiangyuyi/lightnovel/
 ├─ core/
 │  ├─ data/          Repository
+│  ├─ cache/         内存/SQLite 两级缓存、TTL 与 LRU
 │  ├─ model/         书籍、分卷、章节、评论与阅读设置
 │  ├─ network/       Cronet/QUIC、API 解包与兼容解析
 │  ├─ preferences/   阅读偏好和本地进度

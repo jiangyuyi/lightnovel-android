@@ -40,6 +40,7 @@ import coil.compose.AsyncImage
 import io.github.jiangyuyi.lightnovel.core.ui.EmptyPane
 import io.github.jiangyuyi.lightnovel.core.ui.ErrorPane
 import io.github.jiangyuyi.lightnovel.core.ui.LoadingPane
+import io.github.jiangyuyi.lightnovel.core.ui.RefreshStatus
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,11 +63,13 @@ fun BookScreen(
             TopAppBar(
                 title = { Text(state.detail?.book?.title ?: "书籍详情", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
+                actions = { TextButton(onClick = { viewModel.load(true) }) { Text("刷新") } },
             )
         }
+        item { RefreshStatus(state.refreshing, state.refreshError) }
         when {
             state.loading -> item { LoadingPane() }
-            state.error != null && state.detail == null -> item { ErrorPane(state.error!!, onRetry = viewModel::load) }
+            state.error != null && state.detail == null -> item { ErrorPane(state.error!!, onRetry = { viewModel.load(true) }) }
             state.detail == null -> item { EmptyPane("书籍不存在或暂不可见") }
             else -> {
                 val detail = checkNotNull(state.detail)

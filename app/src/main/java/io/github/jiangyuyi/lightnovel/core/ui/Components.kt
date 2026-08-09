@@ -14,8 +14,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -29,9 +30,51 @@ import io.github.jiangyuyi.lightnovel.core.model.BookSummary
 
 @Composable
 fun LoadingPane(modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
+    Column(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        repeat(3) {
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                PlaceholderBlock(Modifier.size(width = 82.dp, height = 116.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PlaceholderBlock(Modifier.fillMaxWidth(0.72f).height(20.dp))
+                    PlaceholderBlock(Modifier.fillMaxWidth(0.42f).height(14.dp))
+                    PlaceholderBlock(Modifier.fillMaxWidth().height(14.dp))
+                    PlaceholderBlock(Modifier.fillMaxWidth(0.88f).height(14.dp))
+                }
+            }
+        }
     }
+}
+
+@Composable
+fun RefreshStatus(
+    refreshing: Boolean,
+    refreshError: String?,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier.fillMaxWidth()) {
+        if (refreshing) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (!refreshError.isNullOrBlank()) {
+            Text(
+                text = "刷新失败，当前显示缓存内容：${displayErrorMessage(refreshError)}",
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PlaceholderBlock(modifier: Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+        content = {},
+    )
 }
 
 @Composable
@@ -41,7 +84,7 @@ fun ErrorPane(message: String, modifier: Modifier = Modifier, onRetry: (() -> Un
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(message, color = MaterialTheme.colorScheme.error)
+        Text(displayErrorMessage(message), color = MaterialTheme.colorScheme.error)
         if (onRetry != null) Button(onClick = onRetry) { Text("重试") }
     }
 }
@@ -51,6 +94,17 @@ fun EmptyPane(message: String, modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
         Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+private fun displayErrorMessage(message: String): String {
+    val compact = message.trim()
+    if (compact.contains("CronetUrlRequest", ignoreCase = true) ||
+        compact.contains("ERR_INTERNET_", ignoreCase = true) ||
+        compact.contains("ERR_NETWORK_", ignoreCase = true)
+    ) {
+        return "网络连接失败，请检查网络后重试"
+    }
+    return compact.lineSequence().firstOrNull().orEmpty().take(160).ifBlank { "加载失败，请稍后重试" }
 }
 
 @Composable

@@ -43,6 +43,7 @@ import io.github.jiangyuyi.lightnovel.core.model.UserSummary
 import io.github.jiangyuyi.lightnovel.core.ui.EmptyPane
 import io.github.jiangyuyi.lightnovel.core.ui.ErrorPane
 import io.github.jiangyuyi.lightnovel.core.ui.LoadingPane
+import io.github.jiangyuyi.lightnovel.core.ui.RefreshStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,6 +64,7 @@ fun MessagesScreen(
                 title = { Text("消息中心") },
                 navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
                 actions = {
+                    TextButton(onClick = viewModel::refresh) { Text("刷新") }
                     TextButton(
                         onClick = viewModel::markCurrentRead,
                         enabled = !state.markingRead && state.summary.count(state.category) > 0,
@@ -70,6 +72,7 @@ fun MessagesScreen(
                 },
             )
         }
+        item { RefreshStatus(state.refreshing, state.refreshError) }
         item {
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp),
@@ -237,8 +240,10 @@ fun DmThreadScreen(
             TopAppBar(
                 title = { Text("与 ${peer.nickname} 的私信") },
                 navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
+                actions = { TextButton(onClick = { viewModel.refresh(true) }) { Text("刷新") } },
             )
         }
+        item { RefreshStatus(state.refreshing, state.refreshError) }
         item {
             Text(
                 "只读会话：本版本不会发送消息。",
@@ -249,7 +254,7 @@ fun DmThreadScreen(
         }
         when {
             state.loading -> item { LoadingPane() }
-            state.error != null -> item { ErrorPane(state.error!!, onRetry = viewModel::refresh) }
+            state.error != null -> item { ErrorPane(state.error!!, onRetry = { viewModel.refresh(true) }) }
             state.messages.isEmpty() -> item { EmptyPane("暂无私信消息") }
             else -> items(state.messages, key = { it.id }) { DmBubble(it) }
         }

@@ -45,6 +45,7 @@ import io.github.jiangyuyi.lightnovel.core.model.SocialUser
 import io.github.jiangyuyi.lightnovel.core.ui.EmptyPane
 import io.github.jiangyuyi.lightnovel.core.ui.ErrorPane
 import io.github.jiangyuyi.lightnovel.core.ui.LoadingPane
+import io.github.jiangyuyi.lightnovel.core.ui.RefreshStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,7 +58,8 @@ fun SocialScreen(viewModel: SocialViewModel, onBack: () -> Unit) {
         contentPadding = PaddingValues(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        item { AccountTopBar("关注与粉丝", onBack) }
+        item { AccountTopBar("关注与粉丝", onBack, viewModel::refresh) }
+        item { RefreshStatus(state.refreshing, state.refreshError) }
         item {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -162,7 +164,8 @@ fun HistoryScreen(
         contentPadding = PaddingValues(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        item { AccountTopBar("阅读记录", onBack) }
+        item { AccountTopBar("阅读记录", onBack, viewModel::refresh) }
+        item { RefreshStatus(state.refreshing, state.refreshError) }
         state.actionError?.let { item { ErrorText(it) } }
         when {
             state.loading -> item { LoadingPane() }
@@ -247,7 +250,8 @@ fun PublishingScreen(viewModel: PublishingViewModel, onBack: () -> Unit, onBook:
         contentPadding = PaddingValues(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        item { AccountTopBar("发布管理", onBack) }
+        item { AccountTopBar("发布管理", onBack, viewModel::refresh) }
+        item { RefreshStatus(state.refreshing, state.refreshError) }
         item {
             Text(
                 "展示作品、连载状态与审核进度；新建和编辑请暂时使用网站作者工作台。",
@@ -307,10 +311,13 @@ private fun PublishedWorkCard(work: PublishedWork, onClick: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AccountTopBar(title: String, onBack: () -> Unit) {
+private fun AccountTopBar(title: String, onBack: () -> Unit, onRefresh: (() -> Unit)? = null) {
     TopAppBar(
         title = { Text(title) },
         navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
+        actions = {
+            onRefresh?.let { TextButton(onClick = it) { Text("刷新") } }
+        },
     )
 }
 

@@ -1,11 +1,15 @@
 package io.github.jiangyuyi.lightnovel.core.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class UserSummary(
     val uid: Long,
     val nickname: String,
     val avatarUrl: String? = null,
 )
 
+@Serializable
 data class AccountProfile(
     val user: UserSummary,
     val signature: String = "",
@@ -17,6 +21,7 @@ data class AccountProfile(
     val postCount: Int = 0,
 )
 
+@Serializable
 data class SocialUser(
     val user: UserSummary,
     val signature: String = "",
@@ -25,6 +30,7 @@ data class SocialUser(
     val relationState: String = "",
 )
 
+@Serializable
 data class Session(
     val loggedIn: Boolean = false,
     val securityKey: String = "",
@@ -32,6 +38,7 @@ data class Session(
     val user: UserSummary? = null,
 )
 
+@Serializable
 data class BookSummary(
     val id: Long,
     val title: String,
@@ -50,6 +57,7 @@ data class BookSummary(
     val unreadChapterCount: Int? = null,
 )
 
+@Serializable
 data class BookDetail(
     val book: BookSummary,
     val publisher: UserSummary? = null,
@@ -58,6 +66,7 @@ data class BookDetail(
     val favoriteCount: Int = 0,
 )
 
+@Serializable
 data class Volume(
     val id: Long,
     val bookId: Long,
@@ -67,6 +76,7 @@ data class Volume(
     val lastChapterId: Long? = null,
 )
 
+@Serializable
 data class ChapterSummary(
     val id: Long,
     val bookId: Long,
@@ -77,6 +87,7 @@ data class ChapterSummary(
     val locked: Boolean = false,
 )
 
+@Serializable
 data class ChapterDetail(
     val chapter: ChapterSummary,
     val bookTitle: String,
@@ -87,6 +98,7 @@ data class ChapterDetail(
     val nextChapterId: Long? = null,
 )
 
+@Serializable
 data class ReaderBootstrap(
     val book: BookSummary,
     val chapterId: Long,
@@ -95,6 +107,7 @@ data class ReaderBootstrap(
     val resumeAvailable: Boolean = false,
 )
 
+@Serializable
 data class Comment(
     val id: Long,
     val author: UserSummary,
@@ -104,6 +117,7 @@ data class Comment(
     val replyCount: Int = 0,
 )
 
+@Serializable
 data class Page<T>(
     val items: List<T>,
     val page: Int = 1,
@@ -111,17 +125,20 @@ data class Page<T>(
     val hasMore: Boolean = false,
 )
 
+@Serializable
 data class SearchTaxonomy(
     val channels: List<SearchOption>,
     val tags: List<SearchOption>,
 )
 
+@Serializable
 data class SearchOption(
     val id: String,
     val label: String,
     val workType: String = "",
 )
 
+@Serializable
 enum class DiscoverChannel(val label: String) {
     HOT("热门"),
     RANK("排行"),
@@ -133,12 +150,14 @@ enum class DiscoverChannel(val label: String) {
     COLLECTION("合集"),
 }
 
+@Serializable
 enum class ReaderFont(val label: String) {
     SANS("无衬线"),
     SERIF("衬线"),
     MONO("等宽"),
 }
 
+@Serializable
 enum class ReaderTheme(val label: String) {
     WHITE("白色"),
     SEPIA("米黄"),
@@ -146,11 +165,13 @@ enum class ReaderTheme(val label: String) {
     DARK("深色"),
 }
 
+@Serializable
 enum class ReaderMode(val label: String) {
     PAGED("左右翻页"),
     SCROLL("上下滚动"),
 }
 
+@Serializable
 data class ReaderPreferences(
     val font: ReaderFont = ReaderFont.SERIF,
     val fontSize: Float = 19f,
@@ -160,12 +181,14 @@ data class ReaderPreferences(
     val mode: ReaderMode = ReaderMode.PAGED,
 )
 
+@Serializable
 data class LocalReadingProgress(
     val chapterId: Long,
     val paragraphIndex: Int,
     val percent: Int,
 )
 
+@Serializable
 data class ReadingHistoryItem(
     val book: BookSummary,
     val lastChapterId: Long? = null,
@@ -173,6 +196,7 @@ data class ReadingHistoryItem(
     val readAt: String = "",
 )
 
+@Serializable
 data class PublishedWork(
     val bookId: Long,
     val title: String,
@@ -189,6 +213,7 @@ data class PublishedWork(
     val updatedAt: String = "",
 )
 
+@Serializable
 enum class MessageCategory(val code: String, val label: String) {
     DM("dm", "私信"),
     REPLY("reply", "回复"),
@@ -198,6 +223,7 @@ enum class MessageCategory(val code: String, val label: String) {
     SYSTEM("system", "系统"),
 }
 
+@Serializable
 data class MessageSummary(
     val unreadCount: Int = 0,
     val replyCount: Int = 0,
@@ -229,6 +255,7 @@ data class MessageSummary(
     }
 }
 
+@Serializable
 data class NotificationMessage(
     val id: String,
     val category: MessageCategory,
@@ -250,6 +277,7 @@ data class NotificationMessage(
     val targetUrl: String = "",
 )
 
+@Serializable
 data class DmConversation(
     val id: String,
     val peerUid: Long,
@@ -261,6 +289,7 @@ data class DmConversation(
     val denyReason: String = "",
 )
 
+@Serializable
 data class DmMessage(
     val id: String,
     val conversationId: String = "",

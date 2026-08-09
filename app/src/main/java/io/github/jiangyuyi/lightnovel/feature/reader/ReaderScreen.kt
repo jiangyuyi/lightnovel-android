@@ -119,7 +119,7 @@ fun ReaderScreen(viewModel: ReaderViewModel, onBack: () -> Unit, onCatalog: () -
 
     Box(modifier = Modifier.fillMaxSize().background(colors.background)) {
         when {
-            state.loading -> LoadingPane(Modifier.align(Alignment.Center))
+            state.loading && state.chapter == null -> LoadingPane(Modifier.align(Alignment.Center))
             state.error != null -> ErrorPane(
                 message = state.error!!,
                 modifier = Modifier.align(Alignment.Center),
@@ -154,6 +154,12 @@ fun ReaderScreen(viewModel: ReaderViewModel, onBack: () -> Unit, onCatalog: () -
                 jumpRequest = jumpRequest,
                 onJumpConsumed = { consumed -> if (jumpRequest == consumed) jumpRequest = null },
                 onPositionChanged = { current, total -> readerPosition = ReaderPosition(current, total, "段") },
+            )
+        }
+
+        if (state.refreshing) {
+            LinearProgressIndicator(
+                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(top = safeTopPadding),
             )
         }
 

@@ -12,6 +12,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -22,7 +23,10 @@ data class ReaderState(
     val controlsVisible: Boolean = false,
     val settingsVisible: Boolean = false,
     val loading: Boolean = true,
+    val refreshing: Boolean = false,
     val error: String? = null,
+    val refreshError: String? = null,
+    val lastUpdatedAt: Long? = null,
 )
 
 class ReaderViewModel(
@@ -47,32 +51,46 @@ class ReaderViewModel(
         loadChapter(initialChapterId)
     }
 
-    fun loadChapter(chapterId: Long) {
+    fun loadChapter(chapterId: Long, forceRefresh: Boolean = false) {
         if (chapterId <= 0) return
         chapterLoadJob?.cancel()
         progressJob?.cancel()
+        val hasCurrentChapter = _state.value.chapter?.chapter?.id == chapterId
         currentChapterId = chapterId
         _state.value = _state.value.copy(
-            loading = true,
+            chapter = _state.value.chapter.takeIf { hasCurrentChapter },
+            loading = !hasCurrentChapter,
+            refreshing = hasCurrentChapter && forceRefresh,
             error = null,
+            refreshError = null,
             settingsVisible = false,
             controlsVisible = false,
         )
         chapterLoadJob = viewModelScope.launch {
             val progress = preferenceStore.progress(bookId).first()
-            runCatching { repository.chapter(bookId, chapterId) }
-                .onSuccess { chapter ->
-                    if (currentChapterId != chapterId) return@onSuccess
+            repository.chapterUpdates(bookId, chapterId, forceRefresh)
+                .catch { throwable ->
+                    if (currentChapterId != chapterId) return@catch
+                    val current = _state.value
+                    val message = throwable.message ?: "章节加载失败"
+                    _state.value = if (current.chapter == null) {
+                        current.copy(loading = false, refreshing = false, error = message)
+                    } else {
+                        current.copy(loading = false, refreshing = false, refreshError = message)
+                    }
+                }
+                .collect { update ->
+                    if (currentChapterId != chapterId) return@collect
                     _state.value = _state.value.copy(
-                        chapter = chapter,
+                        chapter = update.data,
                         restoredParagraph = progress?.takeIf { it.chapterId == chapterId }?.paragraphIndex ?: 0,
                         loading = false,
+                        refreshing = update.refreshing,
+                        error = null,
+                        refreshError = update.error?.message,
+                        lastUpdatedAt = update.savedAtMillis,
                         controlsVisible = false,
                     )
-                }
-                .onFailure {
-                    if (currentChapterId != chapterId) return@onFailure
-                    _state.value = _state.value.copy(loading = false, error = it.message ?: "章节加载失败")
                 }
         }
     }
@@ -81,7 +99,7 @@ class ReaderViewModel(
 
     fun next() = _state.value.chapter?.nextChapterId?.let(::loadChapter)
 
-    fun retry() = loadChapter(currentChapterId)
+    fun retry() = loadChapter(currentChapterId, forceRefresh = true)
 
     fun toggleControls() {
         _state.value = _state.value.copy(controlsVisible = !_state.value.controlsVisible)

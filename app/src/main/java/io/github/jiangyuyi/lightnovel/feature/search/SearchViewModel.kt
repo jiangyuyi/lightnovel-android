@@ -9,6 +9,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 
 data class SearchState(
@@ -18,7 +19,10 @@ data class SearchState(
     val taxonomy: SearchTaxonomy = SearchTaxonomy(emptyList(), emptyList()),
     val results: List<BookSummary> = emptyList(),
     val loading: Boolean = false,
+    val refreshing: Boolean = false,
     val error: String? = null,
+    val refreshError: String? = null,
+    val lastUpdatedAt: Long? = null,
 )
 
 class SearchViewModel(private val repository: LightNovelRepository) : ViewModel() {
@@ -28,8 +32,8 @@ class SearchViewModel(private val repository: LightNovelRepository) : ViewModel(
 
     init {
         viewModelScope.launch {
-            runCatching { repository.taxonomy() }.onSuccess { taxonomy ->
-                _state.value = _state.value.copy(taxonomy = taxonomy)
+            repository.taxonomyUpdates().catch { }.collect { update ->
+                _state.value = _state.value.copy(taxonomy = update.data)
             }
         }
     }
@@ -56,16 +60,39 @@ class SearchViewModel(private val repository: LightNovelRepository) : ViewModel(
         search()
     }
 
-    fun search() {
+    fun search(forceRefresh: Boolean = false) {
         searchJob?.cancel()
-        _state.value = _state.value.copy(loading = true, error = null)
+        val hasContent = _state.value.results.isNotEmpty()
+        _state.value = _state.value.copy(
+            loading = !hasContent,
+            refreshing = hasContent && forceRefresh,
+            error = null,
+            refreshError = null,
+        )
         searchJob = viewModelScope.launch {
-            runCatching {
-                repository.search(_state.value.query, _state.value.workType, _state.value.primaryTag)
-            }.onSuccess { page ->
-                _state.value = _state.value.copy(results = page.items, loading = false)
-            }.onFailure { error ->
-                _state.value = _state.value.copy(loading = false, error = error.message ?: "搜索失败")
+            val request = _state.value
+            repository.searchUpdates(
+                request.query,
+                request.workType,
+                request.primaryTag,
+                forceRefresh = forceRefresh,
+            ).catch { throwable ->
+                val current = _state.value
+                val message = throwable.message ?: "搜索失败"
+                _state.value = if (current.results.isEmpty()) {
+                    current.copy(loading = false, refreshing = false, error = message)
+                } else {
+                    current.copy(loading = false, refreshing = false, refreshError = message)
+                }
+            }.collect { update ->
+                _state.value = _state.value.copy(
+                    results = update.data.items,
+                    loading = false,
+                    refreshing = update.refreshing,
+                    error = null,
+                    refreshError = update.error?.message,
+                    lastUpdatedAt = update.savedAtMillis,
+                )
             }
         }
     }

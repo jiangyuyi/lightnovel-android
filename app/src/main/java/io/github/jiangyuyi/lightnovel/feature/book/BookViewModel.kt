@@ -7,10 +7,12 @@ import io.github.jiangyuyi.lightnovel.core.model.BookDetail
 import io.github.jiangyuyi.lightnovel.core.model.ChapterSummary
 import io.github.jiangyuyi.lightnovel.core.model.Comment
 import io.github.jiangyuyi.lightnovel.core.model.Volume
-import kotlinx.coroutines.async
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 data class BookState(
@@ -23,8 +25,11 @@ data class BookState(
     val commentsAvailable: Boolean = true,
     val inBookshelf: Boolean = false,
     val loading: Boolean = true,
+    val refreshing: Boolean = false,
     val shelfLoading: Boolean = false,
     val error: String? = null,
+    val refreshError: String? = null,
+    val lastUpdatedAt: Long? = null,
 )
 
 class BookViewModel(
@@ -33,32 +38,87 @@ class BookViewModel(
 ) : ViewModel() {
     private val _state = MutableStateFlow(BookState())
     val state: StateFlow<BookState> = _state.asStateFlow()
+    private var loadJob: Job? = null
+    private var detailRefreshing = false
+    private var volumesRefreshing = false
+    private var commentsRefreshing = false
+    private var shelfMembership: Boolean? = null
 
     init {
         load()
     }
 
-    fun load() {
-        _state.value = BookState(loading = true)
-        viewModelScope.launch {
-            val detailRequest = async { repository.bookDetail(bookId) }
-            val volumeRequest = async { repository.volumes(bookId).items }
-            val shelfRequest = async { runCatching { repository.isInBookshelf(bookId) }.getOrDefault(false) }
-            val commentsRequest = async { runCatching { repository.comments(bookId).items } }
-            runCatching {
-                val detail = detailRequest.await()
-                val volumes = volumeRequest.await()
-                val comments = commentsRequest.await()
-                BookState(
-                    detail = detail,
-                    volumes = volumes,
-                    comments = comments.getOrDefault(emptyList()),
-                    commentsAvailable = comments.isSuccess,
-                    inBookshelf = shelfRequest.await(),
-                    loading = false,
-                )
-            }.onSuccess { _state.value = it }
-                .onFailure { _state.value = BookState(loading = false, error = it.message ?: "书籍加载失败") }
+    fun load(forceRefresh: Boolean = false) {
+        loadJob?.cancel()
+        val hasContent = _state.value.detail != null
+        _state.value = _state.value.copy(
+            loading = !hasContent,
+            refreshing = hasContent && forceRefresh,
+            error = null,
+            refreshError = null,
+        )
+        loadJob = viewModelScope.launch {
+            launch {
+                repository.bookDetailUpdates(bookId, forceRefresh)
+                    .catch { throwable -> handleEssentialFailure(throwable) }
+                    .collect { update ->
+                        detailRefreshing = update.refreshing
+                        val shelfState = shelfMembership ?: update.data.book.inBookshelf
+                        _state.value = _state.value.copy(
+                            detail = update.data,
+                            inBookshelf = shelfState ?: _state.value.inBookshelf,
+                            loading = false,
+                            refreshing = isRefreshing(),
+                            error = null,
+                            refreshError = update.error?.message,
+                            lastUpdatedAt = update.savedAtMillis,
+                        )
+                    }
+            }
+            launch {
+                repository.volumesUpdates(bookId, forceRefresh = forceRefresh)
+                    .catch { throwable -> handleSecondaryFailure(throwable) }
+                    .collect { update ->
+                        volumesRefreshing = update.refreshing
+                        _state.value = _state.value.copy(
+                            volumes = update.data.items,
+                            refreshing = isRefreshing(),
+                            refreshError = update.error?.message ?: _state.value.refreshError,
+                            lastUpdatedAt = maxOf(_state.value.lastUpdatedAt ?: 0L, update.savedAtMillis),
+                        )
+                    }
+            }
+            launch {
+                repository.commentsUpdates(bookId, forceRefresh = forceRefresh)
+                    .catch { throwable ->
+                        commentsRefreshing = false
+                        _state.value = _state.value.copy(
+                            commentsAvailable = _state.value.comments.isNotEmpty(),
+                            refreshing = isRefreshing(),
+                            refreshError = throwable.message ?: "评论加载失败",
+                        )
+                    }
+                    .collect { update ->
+                        commentsRefreshing = update.refreshing
+                        _state.value = _state.value.copy(
+                            comments = update.data.items,
+                            commentsAvailable = true,
+                            refreshing = isRefreshing(),
+                            refreshError = update.error?.message ?: _state.value.refreshError,
+                        )
+                    }
+            }
+            if (repository.session.value.loggedIn) {
+                launch {
+                    repository.bookshelfUpdates()
+                        .catch { }
+                        .collect { update ->
+                            val inShelf = update.data.any { it.id == bookId }
+                            shelfMembership = inShelf
+                            _state.value = _state.value.copy(inBookshelf = inShelf)
+                        }
+                }
+            }
         }
     }
 
@@ -69,16 +129,22 @@ class BookViewModel(
         }
         _state.value = _state.value.copy(expandedVolumeId = volumeId)
         if (_state.value.chapters.containsKey(volumeId)) return
-        _state.value = _state.value.copy(loadingVolumeId = volumeId)
+        _state.value = _state.value.copy(loadingVolumeId = volumeId, refreshError = null)
         viewModelScope.launch {
-            runCatching { repository.chapters(bookId, volumeId).items }
-                .onSuccess { chapters ->
+            repository.chaptersUpdates(bookId, volumeId)
+                .catch { throwable ->
                     _state.value = _state.value.copy(
-                        chapters = _state.value.chapters + (volumeId to chapters),
                         loadingVolumeId = null,
+                        refreshError = throwable.message ?: "章节目录加载失败",
                     )
                 }
-                .onFailure { _state.value = _state.value.copy(loadingVolumeId = null, error = it.message) }
+                .collect { update ->
+                    _state.value = _state.value.copy(
+                        chapters = _state.value.chapters + (volumeId to update.data.items),
+                        loadingVolumeId = if (update.refreshing) volumeId else null,
+                        refreshError = update.error?.message,
+                    )
+                }
         }
     }
 
@@ -92,11 +158,33 @@ class BookViewModel(
         _state.value = _state.value.copy(shelfLoading = true)
         viewModelScope.launch {
             runCatching { repository.setBookshelf(bookId, target) }
-                .onSuccess { _state.value = _state.value.copy(inBookshelf = it, shelfLoading = false) }
+                .onSuccess {
+                    shelfMembership = it
+                    _state.value = _state.value.copy(inBookshelf = it, shelfLoading = false)
+                }
                 .onFailure { _state.value = _state.value.copy(shelfLoading = false, error = it.message) }
         }
     }
 
-    suspend fun readingTarget(): Long = repository.readerBootstrap(bookId).chapterId
-}
+    suspend fun readingTarget(): Long = repository.readerBootstrapUpdates(bookId).first().data.chapterId
 
+    private fun isRefreshing(): Boolean = detailRefreshing || volumesRefreshing || commentsRefreshing
+
+    private fun handleEssentialFailure(throwable: Throwable) {
+        detailRefreshing = false
+        val message = throwable.message ?: "书籍加载失败"
+        _state.value = if (_state.value.detail == null) {
+            _state.value.copy(loading = false, refreshing = isRefreshing(), error = message)
+        } else {
+            _state.value.copy(loading = false, refreshing = isRefreshing(), refreshError = message)
+        }
+    }
+
+    private fun handleSecondaryFailure(throwable: Throwable) {
+        volumesRefreshing = false
+        _state.value = _state.value.copy(
+            refreshing = isRefreshing(),
+            refreshError = throwable.message ?: "目录加载失败",
+        )
+    }
+}

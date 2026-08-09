@@ -14,6 +14,7 @@ class AppViewModel(private val repository: LightNovelRepository) : ViewModel() {
         viewModelScope.launch { repository.restoreSession() }
     }
 
-    fun logout() = repository.logout()
+    fun logout() {
+        viewModelScope.launch { repository.logout() }
+    }
 }
-

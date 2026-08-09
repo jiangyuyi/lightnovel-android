@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -22,6 +23,7 @@ import io.github.jiangyuyi.lightnovel.core.ui.BookCard
 import io.github.jiangyuyi.lightnovel.core.ui.EmptyPane
 import io.github.jiangyuyi.lightnovel.core.ui.ErrorPane
 import io.github.jiangyuyi.lightnovel.core.ui.LoadingPane
+import io.github.jiangyuyi.lightnovel.core.ui.RefreshStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,7 +35,10 @@ fun DiscoverScreen(viewModel: DiscoverViewModel, onBook: (Long) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
-            TopAppBar(title = { Text("轻之国度", color = MaterialTheme.colorScheme.primary) })
+            TopAppBar(
+                title = { Text("轻之国度", color = MaterialTheme.colorScheme.primary) },
+                actions = { TextButton(onClick = viewModel::refresh) { Text("刷新") } },
+            )
             ScrollableTabRow(selectedTabIndex = state.channel.ordinal, edgePadding = 10.dp) {
                 DiscoverChannel.entries.forEach { channel ->
                     Tab(
@@ -44,6 +49,7 @@ fun DiscoverScreen(viewModel: DiscoverViewModel, onBook: (Long) -> Unit) {
                 }
             }
         }
+        item { RefreshStatus(state.refreshing, state.refreshError) }
         when {
             state.loading -> item { LoadingPane() }
             state.error != null -> item { ErrorPane(state.error!!, onRetry = viewModel::retry) }

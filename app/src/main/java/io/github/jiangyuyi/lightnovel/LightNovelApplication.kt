@@ -3,6 +3,8 @@ package io.github.jiangyuyi.lightnovel
 import android.app.Application
 import coil.ImageLoader
 import coil.ImageLoaderFactory
+import io.github.jiangyuyi.lightnovel.core.cache.CachedDataSource
+import io.github.jiangyuyi.lightnovel.core.cache.SqliteCacheStore
 import io.github.jiangyuyi.lightnovel.core.data.LightNovelRepository
 import io.github.jiangyuyi.lightnovel.core.network.CronetImageFetcher
 import io.github.jiangyuyi.lightnovel.core.network.LightNovelApi
@@ -22,5 +24,7 @@ class AppContainer(application: Application) {
     val sessionStore = SessionStore(application)
     val readerPreferences = ReaderPreferencesStore(application)
     val api = LightNovelApi(application)
-    val repository = LightNovelRepository(api, sessionStore)
+    private val cacheStore = SqliteCacheStore(application)
+    private val cachedDataSource = CachedDataSource(cacheStore)
+    val repository = LightNovelRepository(api, sessionStore, cachedDataSource)
 }

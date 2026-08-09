@@ -18,6 +18,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,6 +34,7 @@ import coil.compose.AsyncImage
 import io.github.jiangyuyi.lightnovel.core.model.Session
 import io.github.jiangyuyi.lightnovel.core.ui.ErrorPane
 import io.github.jiangyuyi.lightnovel.core.ui.LoadingPane
+import io.github.jiangyuyi.lightnovel.core.ui.RefreshStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,7 +54,17 @@ fun ProfileScreen(
     LaunchedEffect(session.loggedIn) { viewModel.refresh(session.loggedIn) }
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
-        item { TopAppBar(title = { Text("我的") }) }
+        item {
+            TopAppBar(
+                title = { Text("我的") },
+                actions = {
+                    if (session.loggedIn) {
+                        TextButton(onClick = { viewModel.refresh(true, true) }) { Text("刷新") }
+                    }
+                },
+            )
+        }
+        item { RefreshStatus(state.refreshing, state.refreshError) }
         item {
             Column(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -101,7 +113,7 @@ fun ProfileScreen(
                 when {
                     state.loading && state.profile == null -> LoadingPane()
                     state.error != null && state.profile == null -> ErrorPane(state.error!!, onRetry = {
-                        viewModel.refresh(session.loggedIn)
+                        viewModel.refresh(session.loggedIn, true)
                     })
                 }
 

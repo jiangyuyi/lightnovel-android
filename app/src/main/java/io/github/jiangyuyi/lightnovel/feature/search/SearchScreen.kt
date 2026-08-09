@@ -29,6 +29,7 @@ import io.github.jiangyuyi.lightnovel.core.ui.BookCard
 import io.github.jiangyuyi.lightnovel.core.ui.EmptyPane
 import io.github.jiangyuyi.lightnovel.core.ui.ErrorPane
 import io.github.jiangyuyi.lightnovel.core.ui.LoadingPane
+import io.github.jiangyuyi.lightnovel.core.ui.RefreshStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,6 +61,7 @@ fun SearchScreen(viewModel: SearchViewModel, onBook: (Long) -> Unit) {
                 }
             }
         }
+        item { RefreshStatus(state.refreshing, state.refreshError) }
         if (state.taxonomy.channels.isNotEmpty()) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -97,7 +99,7 @@ fun SearchScreen(viewModel: SearchViewModel, onBook: (Long) -> Unit) {
         }
         when {
             state.loading -> item { LoadingPane() }
-            state.error != null -> item { ErrorPane(state.error!!, onRetry = viewModel::search) }
+            state.error != null -> item { ErrorPane(state.error!!, onRetry = { viewModel.search(true) }) }
             state.results.isEmpty() -> item { EmptyPane("输入关键词或选择分类开始搜索") }
             else -> items(state.results, key = { it.id }) { book ->
                 BookCard(book, onClick = { onBook(book.id) }, modifier = Modifier.padding(horizontal = 14.dp))
