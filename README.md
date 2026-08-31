@@ -7,6 +7,7 @@
 轻之国度（`lightnovel.fun`）的非官方 Android 客户端。项目基于 2026-08-06 实测的站点 Web BFF/API 实现，使用 Kotlin、Jetpack Compose 和 Material 3。
 
 [下载最新 Release APK](https://github.com/jiangyuyi/lightnovel-android/releases/latest)
+[度盘](https://pan.baidu.com/s/1mXTbkthYcq-4oMNX4AtCTA?pwd=yc85)  提取码: yc85
 
 > 本项目仅用于学习与个人使用，不隶属于轻之国度。请遵守站点规则和内容版权要求，不要批量抓取、分发或商业使用站点内容。
 
