@@ -1,9 +1,15 @@
 package io.github.jiangyuyi.lightnovel.feature.reader
 
 import android.app.Activity
+import android.app.DownloadManager
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
+import android.net.Uri
+import android.os.Environment
+import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -58,8 +64,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -67,10 +75,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextIndent
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -89,6 +101,8 @@ import kotlin.math.roundToInt
 @Composable
 fun ReaderScreen(viewModel: ReaderViewModel, onBack: () -> Unit, onCatalog: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val colors = state.preferences.readerColors()
     val safeTopPadding = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
     val chapterId = state.chapter?.chapter?.id
@@ -110,11 +124,34 @@ fun ReaderScreen(viewModel: ReaderViewModel, onBack: () -> Unit, onCatalog: () -
     }
     var jumpRequestToken by remember { mutableIntStateOf(0) }
     var jumpDialogVisible by rememberSaveable(chapterId, state.preferences.mode) { mutableStateOf(false) }
+    var pendingLink by remember { mutableStateOf<ReaderLinkTarget?>(null) }
+    var webUnlockOpened by remember { mutableStateOf(false) }
+    val openReaderLink: (ReaderBlock.Link) -> Unit = { link ->
+        val target = ReaderLinkPolicy.classify(link.url, link.text)
+        when (target?.kind) {
+            ReaderLinkKind.INTERNAL_WEB -> context.openWebUrl(target.url)
+            ReaderLinkKind.DIRECT_DOWNLOAD,
+            ReaderLinkKind.EXTERNAL_WEB,
+            -> pendingLink = target
+            null -> Toast.makeText(context, "该链接不受支持", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     ImmersiveReaderEffect(darkBackground = state.preferences.theme == ReaderTheme.DARK)
 
     LaunchedEffect(state.chapter?.chapter?.id, state.restoredParagraph) {
         anchorBlock = state.restoredParagraph.coerceAtLeast(0)
+    }
+
+    DisposableEffect(lifecycleOwner, webUnlockOpened) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && webUnlockOpened) {
+                webUnlockOpened = false
+                viewModel.refreshAfterWebUnlock()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(colors.background)) {
@@ -141,6 +178,7 @@ fun ReaderScreen(viewModel: ReaderViewModel, onBack: () -> Unit, onCatalog: () -
                 jumpRequest = jumpRequest,
                 onJumpConsumed = { consumed -> if (jumpRequest == consumed) jumpRequest = null },
                 onPositionChanged = { current, total -> readerPosition = ReaderPosition(current, total, "页") },
+                onLink = openReaderLink,
             )
             else -> ScrollingReader(
                 blocks = blocks,
@@ -154,6 +192,7 @@ fun ReaderScreen(viewModel: ReaderViewModel, onBack: () -> Unit, onCatalog: () -
                 jumpRequest = jumpRequest,
                 onJumpConsumed = { consumed -> if (jumpRequest == consumed) jumpRequest = null },
                 onPositionChanged = { current, total -> readerPosition = ReaderPosition(current, total, "段") },
+                onLink = openReaderLink,
             )
         }
 
@@ -182,6 +221,14 @@ fun ReaderScreen(viewModel: ReaderViewModel, onBack: () -> Unit, onCatalog: () -
                 onShowJumpDialog = { jumpDialogVisible = true },
             )
         }
+
+        val chapter = state.chapter?.chapter
+        if (chapter?.accessType.equals("coin", ignoreCase = true) && chapter?.unlocked != true && !state.unlockPromptVisible) {
+            Button(
+                onClick = { viewModel.showUnlockPrompt(true) },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 44.dp),
+            ) { Text("解锁本章") }
+        }
     }
 
     if (state.settingsVisible) {
@@ -203,6 +250,58 @@ fun ReaderScreen(viewModel: ReaderViewModel, onBack: () -> Unit, onCatalog: () -
             onDismiss = { jumpDialogVisible = false },
         )
     }
+
+
+    val lockedChapter = state.chapter?.chapter
+    if (state.unlockPromptVisible && lockedChapter != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.showUnlockPrompt(false) },
+            title = { Text("解锁章节") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("本章需要 ${lockedChapter.coinPrice.coerceAtLeast(0)} 轻币解锁。")
+                    when {
+                        !state.loggedIn -> Text("App 当前未登录。网页可能会要求先登录轻之国度。")
+                        state.coinBalanceLoading -> Text("正在查询轻币余额…")
+                        state.coinBalance != null -> Text("当前余额：${state.coinBalance} 轻币")
+                        else -> Text("暂未取得余额，可刷新后再继续。")
+                    }
+                    Text("支付将在轻之国度官方网页完成；返回 App 后会自动刷新章节和余额。")
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        webUnlockOpened = true
+                        viewModel.showUnlockPrompt(false)
+                        context.openWebUrl("https://www.lightnovel.fun/reader/${lockedChapter.bookId}/${lockedChapter.id}")
+                    },
+                ) { Text(if (state.loggedIn) "前往网页解锁" else "登录并解锁") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { viewModel.refreshCoinBalance(force = true) }, enabled = !state.coinBalanceLoading) { Text("刷新余额") }
+                    TextButton(onClick = { viewModel.showUnlockPrompt(false) }) { Text("取消") }
+                }
+            },
+        )
+    }
+
+    pendingLink?.let { target ->
+        ReaderLinkDialog(
+            target = target,
+            onDismiss = { pendingLink = null },
+            onConfirm = {
+                when (target.kind) {
+                    ReaderLinkKind.DIRECT_DOWNLOAD -> context.enqueueDownload(target)
+                    ReaderLinkKind.EXTERNAL_WEB,
+                    ReaderLinkKind.INTERNAL_WEB,
+                    -> context.openWebUrl(target.url)
+                }
+                pendingLink = null
+            },
+        )
+    }
 }
 
 @Composable
@@ -222,6 +321,7 @@ private fun PagedReader(
     jumpRequest: ReaderJumpRequest?,
     onJumpConsumed: (ReaderJumpRequest) -> Unit,
     onPositionChanged: (Int, Int) -> Unit,
+    onLink: (ReaderBlock.Link) -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
@@ -301,49 +401,23 @@ private fun PagedReader(
             userScrollEnabled = false,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = pageTopPadding, bottom = pageBottomPadding),
-        ) { pageIndex ->
-            if (pageIndex < pages.size) {
-                Column(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = horizontalPadding),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    pages.getOrNull(pageIndex)?.elements.orEmpty().forEach { element ->
-                        when (element) {
-                            is ReaderPageElement.Text -> ReaderTextElement(element, preferences, colors)
-                            is ReaderPageElement.Illustration -> ReaderIllustration(
-                                block = element.block,
-                                modifier = Modifier.fillMaxWidth().height(with(density) { element.heightPx.toDp() }),
-                                colors = colors,
-                            )
-                        }
-                    }
-                }
-            } else {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("正在进入下一章…", color = colors.text.copy(alpha = 0.72f))
-                }
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
                 .pointerInput(pages.size, hasPreviousChapter, hasNextChapter) {
                     awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                         val start = down.position
                         var releasedX: Float? = null
                         var releasedY: Float? = null
+                        var childConsumed = false
                         while (releasedX == null) {
-                            val event = awaitPointerEvent()
+                            val event = awaitPointerEvent(PointerEventPass.Final)
                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            change.consume()
+                            childConsumed = childConsumed || change.isConsumed
                             if (!change.pressed) {
                                 releasedX = change.position.x
                                 releasedY = change.position.y
                             }
                         }
+                        if (childConsumed) return@awaitEachGesture
                         val endX = releasedX ?: return@awaitEachGesture
                         val endY = releasedY ?: return@awaitEachGesture
                         val deltaX = endX - start.x
@@ -368,8 +442,31 @@ private fun PagedReader(
                             }
                         }
                     }
-                },
-        )
+                }
+                .padding(top = pageTopPadding, bottom = pageBottomPadding),
+        ) { pageIndex ->
+            if (pageIndex < pages.size) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = horizontalPadding),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    pages.getOrNull(pageIndex)?.elements.orEmpty().forEach { element ->
+                        when (element) {
+                            is ReaderPageElement.Text -> ReaderTextElement(element, preferences, colors, onLink)
+                            is ReaderPageElement.Illustration -> ReaderIllustration(
+                                block = element.block,
+                                modifier = Modifier.fillMaxWidth().height(with(density) { element.heightPx.toDp() }),
+                                colors = colors,
+                            )
+                        }
+                    }
+                }
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("正在进入下一章…", color = colors.text.copy(alpha = 0.72f))
+                }
+            }
+        }
 
         if (pagerState.currentPage < pages.size) {
             Text(
@@ -395,6 +492,7 @@ private fun ScrollingReader(
     jumpRequest: ReaderJumpRequest?,
     onJumpConsumed: (ReaderJumpRequest) -> Unit,
     onPositionChanged: (Int, Int) -> Unit,
+    onLink: (ReaderBlock.Link) -> Unit,
 ) {
     val listState = rememberLazyListState()
     LaunchedEffect(blocks) {
@@ -450,19 +548,45 @@ private fun ScrollingReader(
                     ),
                 )
                 is ReaderBlock.Illustration -> ReaderIllustration(block, Modifier.fillMaxWidth(), colors)
+                is ReaderBlock.Link -> ReaderLinkText(block, preferences, colors, onLink)
             }
         }
     }
 }
 
 @Composable
-private fun ReaderTextElement(element: ReaderPageElement.Text, preferences: ReaderPreferences, colors: ReaderColors) {
+private fun ReaderTextElement(
+    element: ReaderPageElement.Text,
+    preferences: ReaderPreferences,
+    colors: ReaderColors,
+    onLink: (ReaderBlock.Link) -> Unit,
+) {
     val style = if (element.heading) preferences.headingStyle(colors.text) else preferences.paragraphStyle(colors.text)
+    val linkUrl = element.linkUrl
     Text(
         text = element.text,
+        color = if (linkUrl != null) MaterialTheme.colorScheme.primary else Color.Unspecified,
+        textDecoration = if (linkUrl != null) TextDecoration.Underline else null,
+        modifier = if (linkUrl != null) Modifier.clickable { onLink(ReaderBlock.Link(element.text, linkUrl)) } else Modifier,
         style = style.copy(
             textIndent = if (element.firstLineIndent) TextIndent(firstLine = preferences.fontSize.sp * 2) else TextIndent.None,
         ),
+    )
+}
+
+@Composable
+private fun ReaderLinkText(
+    block: ReaderBlock.Link,
+    preferences: ReaderPreferences,
+    colors: ReaderColors,
+    onLink: (ReaderBlock.Link) -> Unit,
+) {
+    Text(
+        text = block.text,
+        color = MaterialTheme.colorScheme.primary,
+        textDecoration = TextDecoration.Underline,
+        style = preferences.paragraphStyle(colors.text),
+        modifier = Modifier.fillMaxWidth().clickable { onLink(block) }.padding(vertical = 4.dp),
     )
 }
 
@@ -677,6 +801,57 @@ private fun ReaderOptionChip(selected: Boolean, onClick: () -> Unit, label: Stri
             selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary,
         ),
     )
+}
+
+@Composable
+private fun ReaderLinkDialog(
+    target: ReaderLinkTarget,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val directDownload = target.kind == ReaderLinkKind.DIRECT_DOWNLOAD
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (directDownload) "下载文件" else "打开站外链接") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (directDownload) Text("文件将保存到系统“下载”目录：${target.suggestedFileName}")
+                else Text("即将离开 App，交由浏览器或对应网盘应用打开。")
+                Text("来源：${target.host}", style = MaterialTheme.typography.bodySmall)
+                if (target.url.startsWith("http://")) {
+                    Text("该地址未使用 HTTPS，请确认来源可信。", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(if (directDownload) "开始下载" else "打开") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+private fun Context.openWebUrl(url: String) {
+    runCatching {
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.onFailure {
+        Toast.makeText(this, "没有可打开该链接的应用", Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun Context.enqueueDownload(target: ReaderLinkTarget) {
+    runCatching {
+        val request = DownloadManager.Request(Uri.parse(target.url))
+            .setTitle(target.suggestedFileName)
+            .setDescription("来自 ${target.host}")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, target.suggestedFileName)
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(false)
+            .addRequestHeader("Referer", "https://www.lightnovel.fun/")
+        getSystemService(Context.DOWNLOAD_SERVICE).let { it as DownloadManager }.enqueue(request)
+    }.onSuccess {
+        Toast.makeText(this, "已加入下载任务", Toast.LENGTH_SHORT).show()
+    }.onFailure {
+        Toast.makeText(this, "无法开始下载：${it.message ?: "未知错误"}", Toast.LENGTH_LONG).show()
+    }
 }
 
 @Composable

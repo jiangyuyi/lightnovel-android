@@ -1,5 +1,10 @@
 package io.github.jiangyuyi.lightnovel.feature.book
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -28,10 +34,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,6 +64,8 @@ fun BookScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var shareRequested by remember { mutableStateOf(false) }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 32.dp),
@@ -63,7 +75,12 @@ fun BookScreen(
             TopAppBar(
                 title = { Text(state.detail?.book?.title ?: "书籍详情", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
-                actions = { TextButton(onClick = { viewModel.load(true) }) { Text("刷新") } },
+                actions = {
+                    TextButton(onClick = { shareRequested = true }, enabled = state.detail?.book?.id?.let { it > 0 } == true) {
+                        Text("分享")
+                    }
+                    TextButton(onClick = { viewModel.load(true) }) { Text("刷新") }
+                },
             )
         }
         item { RefreshStatus(state.refreshing, state.refreshError) }
@@ -167,11 +184,24 @@ fun BookScreen(
                                             HorizontalDivider()
                                             Row(
                                                 modifier = Modifier.fillMaxWidth()
-                                                    .clickable(enabled = !chapter.locked) { onRead(chapter.id) }
+                                                    .clickable { onRead(chapter.id) }
                                                     .padding(horizontal = 16.dp, vertical = 13.dp),
                                             ) {
                                                 Text(chapter.title, Modifier.weight(1f))
-                                                if (chapter.locked) Text("锁定", color = MaterialTheme.colorScheme.error)
+                                                when {
+                                                    chapter.accessType.equals("coin", ignoreCase = true) && chapter.unlocked == false -> Text(
+                                                        chapter.coinPrice.takeIf { it > 0 }?.let { "需 $it 轻币" } ?: "需轻币",
+                                                        color = MaterialTheme.colorScheme.tertiary,
+                                                    )
+                                                    chapter.accessType.equals("coin", ignoreCase = true) && chapter.unlocked == null -> Text(
+                                                        "轻币章节",
+                                                        color = MaterialTheme.colorScheme.tertiary,
+                                                    )
+                                                    chapter.locked && chapter.unlocked != true -> Text(
+                                                        "访问受限",
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -200,6 +230,39 @@ fun BookScreen(
                 }
             }
         }
+    }
+
+    if (shareRequested) {
+        val book = state.detail?.book
+        val url = book?.id?.takeIf { it > 0 }?.let { "https://www.lightnovel.fun/book/$it" }.orEmpty()
+        AlertDialog(
+            onDismissRequest = { shareRequested = false },
+            title = { Text("分享图书") },
+            text = { Text(url) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("${book?.title.orEmpty()} 网页链接", url))
+                        Toast.makeText(context, "网页链接已复制", Toast.LENGTH_SHORT).show()
+                        shareRequested = false
+                    },
+                ) { Text("复制链接") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, book?.title.orEmpty())
+                            putExtra(Intent.EXTRA_TEXT, "${book?.title.orEmpty()}\n$url")
+                        }
+                        context.startActivity(Intent.createChooser(sendIntent, "分享图书"))
+                        shareRequested = false
+                    },
+                ) { Text("系统分享") }
+            },
+        )
     }
 }
 

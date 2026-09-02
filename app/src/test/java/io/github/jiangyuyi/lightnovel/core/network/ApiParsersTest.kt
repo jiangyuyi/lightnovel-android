@@ -96,6 +96,55 @@ class ApiParsersTest {
     }
 
     @Test
+    fun `chapter parser preserves coin access state instead of treating every lock alike`() {
+        val chapter = ApiParsers.chapterDetail(
+            obj(
+                """
+                {
+                  "chapter_id": 261248,
+                  "book_id": 436,
+                  "volume_id": 24159,
+                  "title": "EPUB 下载",
+                  "locked": true,
+                  "accessType": "coin",
+                  "unlocked": false,
+                  "coinPrice": 20,
+                  "contentHtml": "<p>购买前预览</p>"
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        assertTrue(chapter.chapter.locked)
+        assertEquals("coin", chapter.chapter.accessType)
+        assertEquals(false, chapter.chapter.unlocked)
+        assertEquals(20, chapter.chapter.coinPrice)
+        assertEquals("<p>购买前预览</p>", chapter.bodyHtml)
+    }
+
+    @Test
+    fun `locked chapter without coin metadata is restricted rather than public`() {
+        val chapter = ApiParsers.chapterDetail(
+            obj(
+                """
+                {
+                  "chapter_id": 259918,
+                  "book_id": 327,
+                  "volume_id": 1,
+                  "title": "无权访问章节",
+                  "locked": true
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        assertTrue(chapter.chapter.locked)
+        assertEquals("restricted", chapter.chapter.accessType)
+        assertEquals("", chapter.bodyText)
+        assertEquals("", chapter.bodyHtml)
+    }
+
+    @Test
     fun `chapter parser accepts live object navigation and direct ids`() {
         val liveObject = ApiParsers.chapterDetail(
             obj(

@@ -22,6 +22,10 @@ data class ReaderState(
     val restoredParagraph: Int = 0,
     val controlsVisible: Boolean = false,
     val settingsVisible: Boolean = false,
+    val unlockPromptVisible: Boolean = false,
+    val coinBalance: Int? = null,
+    val coinBalanceLoading: Boolean = false,
+    val loggedIn: Boolean = false,
     val loading: Boolean = true,
     val refreshing: Boolean = false,
     val error: String? = null,
@@ -43,6 +47,11 @@ class ReaderViewModel(
     private var settingsSyncJob: Job? = null
 
     init {
+        viewModelScope.launch {
+            repository.session.collect { session ->
+                _state.value = _state.value.copy(loggedIn = session.loggedIn)
+            }
+        }
         viewModelScope.launch {
             preferenceStore.preferences.collect { preferences ->
                 _state.value = _state.value.copy(preferences = preferences)
@@ -68,6 +77,7 @@ class ReaderViewModel(
         )
         chapterLoadJob = viewModelScope.launch {
             val progress = preferenceStore.progress(bookId).first()
+            var accessRefreshScheduled = false
             repository.chapterUpdates(bookId, chapterId, forceRefresh)
                 .catch { throwable ->
                     if (currentChapterId != chapterId) return@catch
@@ -81,16 +91,23 @@ class ReaderViewModel(
                 }
                 .collect { update ->
                     if (currentChapterId != chapterId) return@collect
+                    val accessError = update.data.readerAccessError()
                     _state.value = _state.value.copy(
                         chapter = update.data,
                         restoredParagraph = progress?.takeIf { it.chapterId == chapterId }?.paragraphIndex ?: 0,
                         loading = false,
                         refreshing = update.refreshing,
-                        error = null,
-                        refreshError = update.error?.message,
+                        error = accessError,
+                        refreshError = update.error?.message.takeIf { accessError == null },
                         lastUpdatedAt = update.savedAtMillis,
                         controlsVisible = false,
+                        unlockPromptVisible = update.data.chapter.requiresCoinUnlock(),
                     )
+                    if (update.data.chapter.requiresCoinUnlock()) refreshCoinBalance()
+                    if (!forceRefresh && update.data.chapter.requiresCoinUnlock() && !accessRefreshScheduled) {
+                        accessRefreshScheduled = true
+                        viewModelScope.launch { loadChapter(chapterId, forceRefresh = true) }
+                    }
                 }
         }
     }
@@ -100,6 +117,25 @@ class ReaderViewModel(
     fun next() = _state.value.chapter?.nextChapterId?.let(::loadChapter)
 
     fun retry() = loadChapter(currentChapterId, forceRefresh = true)
+
+    fun refreshAfterWebUnlock() {
+        _state.value = _state.value.copy(coinBalance = null)
+        loadChapter(currentChapterId, forceRefresh = true)
+    }
+
+    fun showUnlockPrompt(show: Boolean) {
+        _state.value = _state.value.copy(unlockPromptVisible = show)
+    }
+
+    fun refreshCoinBalance(force: Boolean = false) {
+        if (!repository.session.value.loggedIn || _state.value.coinBalanceLoading || (!force && _state.value.coinBalance != null)) return
+        _state.value = _state.value.copy(coinBalanceLoading = true)
+        viewModelScope.launch {
+            runCatching { repository.myProfile().coin }
+                .onSuccess { balance -> _state.value = _state.value.copy(coinBalance = balance, coinBalanceLoading = false) }
+                .onFailure { _state.value = _state.value.copy(coinBalanceLoading = false, refreshError = it.message) }
+        }
+    }
 
     fun toggleControls() {
         _state.value = _state.value.copy(controlsVisible = !_state.value.controlsVisible)

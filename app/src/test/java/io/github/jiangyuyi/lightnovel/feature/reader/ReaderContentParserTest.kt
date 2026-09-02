@@ -41,4 +41,32 @@ class ReaderContentParserTest {
 
         assertEquals("A&B 。", (blocks.single() as ReaderBlock.Paragraph).text)
     }
+
+    @Test
+    fun `html anchors keep their label and normalized url`() {
+        val blocks = ReaderContentParser.parse(
+            "<p>下载：<a href=\"/download/book.epub?key=1&amp;t=2\">点击下载 EPUB</a></p>",
+            "",
+        )
+
+        assertEquals("下载：", (blocks[0] as ReaderBlock.Paragraph).text)
+        val link = blocks[1] as ReaderBlock.Link
+        assertEquals("点击下载 EPUB", link.text)
+        assertEquals("https://www.lightnovel.fun/download/book.epub?key=1&t=2", link.url)
+    }
+
+    @Test
+    fun `dangerous schemes are discarded instead of becoming reader links`() {
+        val blocks = ReaderContentParser.parse("<p><a href=\"javascript:alert(1)\">领取下载</a></p>", "")
+
+        assertTrue(blocks.none { it is ReaderBlock.Link })
+    }
+
+    @Test
+    fun `plain text urls become clickable blocks`() {
+        val blocks = ReaderContentParser.parse("", "网盘：https://pan.baidu.com/s/demo")
+
+        assertEquals("网盘：", (blocks[0] as ReaderBlock.Paragraph).text)
+        assertEquals("https://pan.baidu.com/s/demo", (blocks[1] as ReaderBlock.Link).url)
+    }
 }
