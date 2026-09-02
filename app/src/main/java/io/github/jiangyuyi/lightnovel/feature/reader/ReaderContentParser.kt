@@ -4,11 +4,18 @@ internal sealed interface ReaderBlock {
     data class Heading(val text: String) : ReaderBlock
     data class Paragraph(val text: String, val firstLineIndent: Boolean = true) : ReaderBlock
     data class Illustration(val url: String, val width: Int? = null, val height: Int? = null) : ReaderBlock
+    data class Link(val text: String, val url: String) : ReaderBlock
 }
 
 internal object ReaderContentParser {
     private val paragraphRegex = Regex("<p([^>]*)>(.*?)</p>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
     private val imageRegex = Regex("<img\\b([^>]*)>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    private val contentTokenRegex = Regex(
+        "<img\\b[^>]*>|<a\\b[^>]*>.*?</a>",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    )
+    private val anchorRegex = Regex("<a\\b([^>]*)>(.*?)</a>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    private val plainUrlRegex = Regex("https?://[^\\s<>()]+", RegexOption.IGNORE_CASE)
     private val tagRegex = Regex("<[^>]+>")
     private val resourceTagRegex = Regex("\\[res][^]]*?\\[/res]", RegexOption.IGNORE_CASE)
 
@@ -21,7 +28,7 @@ internal object ReaderContentParser {
             .lines()
             .map(String::trim)
             .filter(String::isNotBlank)
-            .map { ReaderBlock.Paragraph(it) }
+            .flatMap { plainTextBlocks(it) }
             .ifEmpty { listOf(ReaderBlock.Paragraph("本章暂无正文", firstLineIndent = false)) }
     }
 
@@ -44,11 +51,14 @@ internal object ReaderContentParser {
     private fun MutableList<ReaderBlock>.appendParagraphContent(content: String, firstLineIndent: Boolean) {
         var cursor = 0
         var firstText = true
-        imageRegex.findAll(content).forEach { image ->
-            addText(content.substring(cursor, image.range.first), firstLineIndent && firstText)
+        contentTokenRegex.findAll(content).forEach { token ->
+            addText(content.substring(cursor, token.range.first), firstLineIndent && firstText)
             firstText = false
-            image.toIllustration()?.let(::add)
-            cursor = image.range.last + 1
+            when {
+                token.value.startsWith("<img", ignoreCase = true) -> imageRegex.matchEntire(token.value)?.toIllustration()?.let(::add)
+                token.value.startsWith("<a", ignoreCase = true) -> token.toLink()?.let(::add)
+            }
+            cursor = token.range.last + 1
         }
         addText(content.substring(cursor), firstLineIndent && firstText)
     }
@@ -59,7 +69,7 @@ internal object ReaderContentParser {
             .replace(tagRegex, "")
             .decodeHtmlEntities()
             .trim()
-        if (text.isNotBlank()) add(ReaderBlock.Paragraph(text, firstLineIndent))
+        if (text.isNotBlank()) addAll(plainTextBlocks(text, firstLineIndent))
     }
 
     private fun MatchResult.toIllustration(): ReaderBlock.Illustration? {
@@ -72,6 +82,33 @@ internal object ReaderContentParser {
             height = attributes.attribute("img-height")?.toIntOrNull() ?: attributes.attribute("height")?.toIntOrNull(),
         )
     }
+
+    private fun MatchResult.toLink(): ReaderBlock.Link? {
+        val anchor = anchorRegex.matchEntire(value) ?: return null
+        val href = anchor.groupValues[1].attribute("href")?.decodeHtmlEntities().orEmpty()
+        val url = ReaderLinkPolicy.normalize(href) ?: return null
+        val label = anchor.groupValues[2]
+            .replace(tagRegex, "")
+            .decodeHtmlEntities()
+            .trim()
+            .ifBlank { url }
+        return ReaderBlock.Link(label, url)
+    }
+
+    private fun plainTextBlocks(line: String, firstLineIndent: Boolean = true): List<ReaderBlock> = buildList {
+        var cursor = 0
+        plainUrlRegex.findAll(line).forEach { match ->
+            line.substring(cursor, match.range.first).trim().takeIf(String::isNotBlank)?.let {
+                add(ReaderBlock.Paragraph(it, firstLineIndent = firstLineIndent && cursor == 0))
+            }
+            val raw = match.value.trimEnd('.', ',', '，', '。', ';', '；')
+            ReaderLinkPolicy.normalize(raw)?.let { add(ReaderBlock.Link(raw, it)) }
+            cursor = match.range.first + raw.length
+        }
+        line.substring(cursor).trim().takeIf(String::isNotBlank)?.let {
+            add(ReaderBlock.Paragraph(it, firstLineIndent = firstLineIndent && cursor == 0))
+        }
+    }.ifEmpty { listOf(ReaderBlock.Paragraph(line)) }
 
     private fun String.attribute(name: String): String? =
         Regex("""\b${Regex.escape(name)}\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)

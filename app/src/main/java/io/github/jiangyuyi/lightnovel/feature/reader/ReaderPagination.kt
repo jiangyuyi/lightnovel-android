@@ -23,6 +23,7 @@ internal sealed interface ReaderPageElement {
         val text: String,
         val heading: Boolean,
         val firstLineIndent: Boolean,
+        val linkUrl: String? = null,
         override val blockIndex: Int,
     ) : ReaderPageElement
 
@@ -70,10 +71,12 @@ internal fun paginateReaderBlocks(
         when (block) {
             is ReaderBlock.Heading,
             is ReaderBlock.Paragraph,
+            is ReaderBlock.Link,
             -> {
                 val sourceText = when (block) {
                     is ReaderBlock.Heading -> block.text
                     is ReaderBlock.Paragraph -> block.text
+                    is ReaderBlock.Link -> block.text
                     else -> error("unreachable")
                 }
                 val heading = block is ReaderBlock.Heading
@@ -105,6 +108,7 @@ internal fun paginateReaderBlocks(
                         text = remainingText.substring(0, end),
                         heading = heading,
                         firstLineIndent = indentThisFragment,
+                        linkUrl = (block as? ReaderBlock.Link)?.url,
                         blockIndex = blockIndex,
                     )
                     remainingHeight = (remainingHeight - layout.size.height).coerceAtLeast(0)

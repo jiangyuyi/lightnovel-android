@@ -155,7 +155,16 @@ object ApiParsers {
         title = source.string("title", "chapter_title").ifBlank { "未命名章节" },
         order = source.int("chapter_no", "order_no", "sort_index"),
         wordCount = source.long("word_count"),
-        locked = source.bool("locked") == true || source.bool("unlocked") == false,
+        locked = source.bool("locked") == true,
+        accessType = source.string("access_type", "accessType").ifBlank {
+            when {
+                source.bool("locked") != true -> "public"
+                source.int("coin_price", "coinPrice", "price") > 0 -> "coin"
+                else -> "restricted"
+            }
+        },
+        unlocked = source.bool("unlocked", "is_unlocked", "isUnlocked"),
+        coinPrice = source.int("coin_price", "coinPrice", "price"),
     )
 
     fun chapterDetail(source: JsonObject): ChapterDetail {
@@ -165,8 +174,10 @@ object ApiParsers {
             chapter = chapter(source),
             bookTitle = source.string("book_title"),
             volumeTitle = source.string("volume_title", "origin_volume_title"),
-            bodyText = body?.string("body_text", "text", "content_text").orEmpty(),
-            bodyHtml = body?.string("body_html", "html", "content_html").orEmpty(),
+            bodyText = body?.string("body_text", "text", "content_text").orEmpty()
+                .ifBlank { source.string("body_text", "bodyText", "content_text", "contentText") },
+            bodyHtml = body?.string("body_html", "html", "content_html").orEmpty()
+                .ifBlank { source.string("body_html", "bodyHtml", "content_html", "contentHtml") },
             previousChapterId = navigation?.navigationId("prev_chapter", "previous_chapter", "prev")
                 ?: source.navigationId("prev_chapter", "previous_chapter", "prev_chapter_id"),
             nextChapterId = navigation?.navigationId("next_chapter", "next")
