@@ -1,0 +1,22 @@
+Reader Chinese conversion dependencies
+
+opencc4j 1.14.0
+Author: houbb (binbin.hou)
+https://github.com/houbb/opencc4j
+
+heaven 0.13.0
+Author: houbb (binbin.hou)
+https://github.com/houbb/heaven
+
+nlp-common 0.0.5
+Author: houbb (binbin.hou)
+https://github.com/houbb/nlp-common
+
+These libraries are distributed under the Apache License, Version 2.0.
+The complete license is included in Apache-2.0.txt in this directory.
+The libraries are used unmodified. This application remains MIT licensed.
+
+OpenCC conversion dictionaries originate from the OpenCC project:
+https://github.com/BYVoid/OpenCC
+Authors: BYVoid and OpenCC contributors.
+Licensed under the Apache License, Version 2.0.

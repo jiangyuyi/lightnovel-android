@@ -8,6 +8,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import kotlin.math.floor
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 internal data class ReaderPage(
@@ -15,6 +16,14 @@ internal data class ReaderPage(
     val firstBlockIndex: Int,
     val lastBlockIndex: Int,
 )
+
+internal fun readerPageForAnchor(pages: List<ReaderPage>, blockIndex: Int, currentPage: Int): Int {
+    // A paragraph may span several pages. Prefer the matching page nearest the old
+    // position instead of always jumping back to the beginning of that paragraph.
+    return pages.indices.filter { blockIndex in pages[it].firstBlockIndex..pages[it].lastBlockIndex }
+        .minByOrNull { abs(it - currentPage) }
+        ?: pages.indexOfLast { it.firstBlockIndex <= blockIndex }.coerceAtLeast(0)
+}
 
 internal sealed interface ReaderPageElement {
     val blockIndex: Int

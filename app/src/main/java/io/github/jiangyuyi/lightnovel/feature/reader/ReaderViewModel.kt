@@ -146,8 +146,12 @@ class ReaderViewModel(
     }
 
     fun updatePreferences(transform: (ReaderPreferences) -> ReaderPreferences) {
-        val updated = transform(_state.value.preferences)
+        val previous = _state.value.preferences
+        val updated = transform(previous)
         viewModelScope.launch { preferenceStore.update(updated) }
+        // The three-way script preference is local; do not overwrite website settings
+        // when this is the only change, or cancel an already pending settings sync.
+        if (updated.copy(chineseScript = previous.chineseScript) == previous) return
         settingsSyncJob?.cancel()
         settingsSyncJob = viewModelScope.launch {
             delay(700)

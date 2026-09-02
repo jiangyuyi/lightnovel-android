@@ -21,18 +21,23 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -53,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -76,7 +82,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -88,12 +94,14 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import coil.compose.SubcomposeAsyncImage
 import io.github.jiangyuyi.lightnovel.core.model.ReaderFont
+import io.github.jiangyuyi.lightnovel.core.model.ReaderChineseScript
 import io.github.jiangyuyi.lightnovel.core.model.ReaderMode
 import io.github.jiangyuyi.lightnovel.core.model.ReaderPreferences
 import io.github.jiangyuyi.lightnovel.core.model.ReaderTheme
 import io.github.jiangyuyi.lightnovel.core.ui.ErrorPane
 import io.github.jiangyuyi.lightnovel.core.ui.LoadingPane
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.CancellationException
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -106,11 +114,32 @@ fun ReaderScreen(viewModel: ReaderViewModel, onBack: () -> Unit, onCatalog: () -
     val colors = state.preferences.readerColors()
     val safeTopPadding = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
     val chapterId = state.chapter?.chapter?.id
-    val blocks = remember(state.chapter) {
+    val sourceContent = remember(state.chapter) {
         val chapter = state.chapter
-        if (chapter == null) emptyList() else buildList {
-            add(ReaderBlock.Heading(chapter.chapter.title))
-            addAll(ReaderContentParser.parse(chapter.bodyHtml, chapter.bodyText))
+        ReaderDisplayContent(
+            bookTitle = chapter?.bookTitle.orEmpty(),
+            chapterTitle = chapter?.chapter?.title.orEmpty(),
+            blocks = if (chapter == null) emptyList() else buildList {
+                add(ReaderBlock.Heading(chapter.chapter.title))
+                addAll(ReaderContentParser.parse(chapter.bodyHtml, chapter.bodyText))
+            },
+        )
+    }
+    var displayContent by remember(chapterId) { mutableStateOf(sourceContent) }
+    var converting by remember(chapterId) { mutableStateOf(false) }
+    val blocks = displayContent.blocks
+
+    LaunchedEffect(sourceContent, state.preferences.chineseScript) {
+        converting = true
+        try {
+            displayContent = ReaderChineseConverter.convert(sourceContent, state.preferences.chineseScript)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            displayContent = sourceContent
+            Toast.makeText(context, "简繁转换失败，已显示原文，请重新选择后重试", Toast.LENGTH_LONG).show()
+        } finally {
+            converting = false
         }
     }
     var anchorBlock by rememberSaveable(state.chapter?.chapter?.id) {
@@ -155,48 +184,59 @@ fun ReaderScreen(viewModel: ReaderViewModel, onBack: () -> Unit, onCatalog: () -
     }
 
     Box(modifier = Modifier.fillMaxSize().background(colors.background)) {
-        when {
-            state.loading && state.chapter == null -> LoadingPane(Modifier.align(Alignment.Center))
-            state.error != null -> ErrorPane(
-                message = state.error!!,
-                modifier = Modifier.align(Alignment.Center),
-                onRetry = viewModel::retry,
-            )
-            state.preferences.mode == ReaderMode.PAGED -> PagedReader(
-                blocks = blocks,
-                preferences = state.preferences,
-                colors = colors,
-                anchorBlock = anchorBlock,
-                onAnchorChanged = { anchorBlock = it },
-                onProgress = { index -> viewModel.saveProgress(index, blocks.size) },
-                onToggleControls = viewModel::toggleControls,
-                onPreviousChapter = viewModel::previous,
-                onNextChapter = viewModel::next,
-                hasPreviousChapter = state.chapter?.previousChapterId != null,
-                hasNextChapter = state.chapter?.nextChapterId != null,
-                safeTopPadding = safeTopPadding,
-                jumpRequest = jumpRequest,
-                onJumpConsumed = { consumed -> if (jumpRequest == consumed) jumpRequest = null },
-                onPositionChanged = { current, total -> readerPosition = ReaderPosition(current, total, "页") },
-                onLink = openReaderLink,
-            )
-            else -> ScrollingReader(
-                blocks = blocks,
-                preferences = state.preferences,
-                colors = colors,
-                anchorBlock = anchorBlock,
-                onAnchorChanged = { anchorBlock = it },
-                onProgress = { index -> viewModel.saveProgress(index, blocks.size) },
-                onToggleControls = viewModel::toggleControls,
-                safeTopPadding = safeTopPadding,
-                jumpRequest = jumpRequest,
-                onJumpConsumed = { consumed -> if (jumpRequest == consumed) jumpRequest = null },
-                onPositionChanged = { current, total -> readerPosition = ReaderPosition(current, total, "段") },
-                onLink = openReaderLink,
-            )
+        Column(
+            Modifier.fillMaxSize().windowInsetsPadding(
+                WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+            ),
+        ) {
+            if (state.chapter != null) {
+                ReaderChapterHeader(displayContent.bookTitle, displayContent.chapterTitle, colors.text)
+            }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                key(chapterId) {
+                    when {
+                        state.loading && state.chapter == null -> LoadingPane(Modifier.align(Alignment.Center))
+                        state.error != null -> ErrorPane(
+                            message = state.error!!,
+                            modifier = Modifier.align(Alignment.Center),
+                            onRetry = viewModel::retry,
+                        )
+                        state.preferences.mode == ReaderMode.PAGED -> PagedReader(
+                            blocks = blocks,
+                            preferences = state.preferences,
+                            colors = colors,
+                            anchorBlock = anchorBlock,
+                            onAnchorChanged = { anchorBlock = it },
+                            onProgress = { index -> viewModel.saveProgress(index, blocks.size) },
+                            onToggleControls = viewModel::toggleControls,
+                            onPreviousChapter = viewModel::previous,
+                            onNextChapter = viewModel::next,
+                            hasPreviousChapter = state.chapter?.previousChapterId != null,
+                            hasNextChapter = state.chapter?.nextChapterId != null,
+                            jumpRequest = jumpRequest,
+                            onJumpConsumed = { consumed -> if (jumpRequest == consumed) jumpRequest = null },
+                            onPositionChanged = { current, total -> readerPosition = ReaderPosition(current, total, "页") },
+                            onLink = openReaderLink,
+                        )
+                        else -> ScrollingReader(
+                            blocks = blocks,
+                            preferences = state.preferences,
+                            colors = colors,
+                            anchorBlock = anchorBlock,
+                            onAnchorChanged = { anchorBlock = it },
+                            onProgress = { index -> viewModel.saveProgress(index, blocks.size) },
+                            onToggleControls = viewModel::toggleControls,
+                            jumpRequest = jumpRequest,
+                            onJumpConsumed = { consumed -> if (jumpRequest == consumed) jumpRequest = null },
+                            onPositionChanged = { current, total -> readerPosition = ReaderPosition(current, total, "段") },
+                            onLink = openReaderLink,
+                        )
+                    }
+                }
+            }
         }
 
-        if (state.refreshing) {
+        if (state.refreshing || converting) {
             LinearProgressIndicator(
                 modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(top = safeTopPadding),
             )
@@ -204,7 +244,8 @@ fun ReaderScreen(viewModel: ReaderViewModel, onBack: () -> Unit, onCatalog: () -
 
         if (state.controlsVisible && !state.loading && state.error == null) {
             ReaderControls(
-                bookTitle = state.chapter?.bookTitle ?: "阅读",
+                bookTitle = displayContent.bookTitle.ifBlank { "阅读" },
+                chapterTitle = displayContent.chapterTitle,
                 colors = colors,
                 onBack = onBack,
                 onCatalog = onCatalog,
@@ -317,7 +358,6 @@ private fun PagedReader(
     onNextChapter: () -> Unit,
     hasPreviousChapter: Boolean,
     hasNextChapter: Boolean,
-    safeTopPadding: Dp,
     jumpRequest: ReaderJumpRequest?,
     onJumpConsumed: (ReaderJumpRequest) -> Unit,
     onPositionChanged: (Int, Int) -> Unit,
@@ -329,7 +369,7 @@ private fun PagedReader(
         val paragraphStyle = preferences.paragraphStyle(colors.text)
         val headingStyle = preferences.headingStyle(colors.text)
         val horizontalPadding = preferences.horizontalPadding.dp
-        val pageTopPadding = safeTopPadding + 8.dp
+        val pageTopPadding = 8.dp
         val pageBottomPadding = 12.dp
         val pageWidthPx = with(density) { (maxWidth - horizontalPadding * 2).roundToPx().coerceAtLeast(1) }
         val pageHeightPx = with(density) {
@@ -349,17 +389,16 @@ private fun PagedReader(
             )
         }
         val pagerState = rememberPagerState {
-            pages.size.coerceAtLeast(1) + if (hasNextChapter) 1 else 0
+            pages.size.coerceAtLeast(1)
         }
+        var positionedPages by remember { mutableStateOf<List<ReaderPage>?>(null) }
         var turnRequest by remember { mutableStateOf<ReaderTurnRequest?>(null) }
         var turnRequestToken by remember { mutableIntStateOf(0) }
 
         LaunchedEffect(pages) {
-            val containingPage = pages.indexOfFirst { anchorBlock in it.firstBlockIndex..it.lastBlockIndex }
-            val target = (containingPage.takeIf { it >= 0 } ?: pages.indexOfLast { it.firstBlockIndex <= anchorBlock })
-                .coerceAtLeast(0)
-                .coerceAtMost(pages.lastIndex.coerceAtLeast(0))
+            val target = readerPageForAnchor(pages, anchorBlock, pagerState.currentPage)
             if (pagerState.currentPage != target) pagerState.scrollToPage(target)
+            positionedPages = pages
         }
         LaunchedEffect(jumpRequest?.token, pages.size) {
             val request = jumpRequest ?: return@LaunchedEffect
@@ -367,9 +406,10 @@ private fun PagedReader(
             onJumpConsumed(request)
         }
         LaunchedEffect(pagerState, pages) {
-            snapshotFlow { pagerState.currentPage }
+            snapshotFlow { pagerState.currentPage.takeIf { positionedPages === pages } }
                 .distinctUntilChanged()
                 .collect { pageIndex ->
+                    if (pageIndex == null) return@collect
                     pages.getOrNull(pageIndex)?.firstBlockIndex?.let {
                         onAnchorChanged(it)
                         onProgress(it)
@@ -377,9 +417,8 @@ private fun PagedReader(
                     }
                 }
         }
-        LaunchedEffect(pagerState.currentPage, pages.size, hasNextChapter) {
-            if (hasNextChapter && pagerState.currentPage == pages.size) onNextChapter()
-        }
+        // Chapter changes only follow an explicit gesture. Re-pagination (including
+        // script conversion) can shrink the page count and must not advance chapters.
         LaunchedEffect(turnRequest?.token) {
             val request = turnRequest ?: return@LaunchedEffect
             when (request.direction) {
@@ -488,7 +527,6 @@ private fun ScrollingReader(
     onAnchorChanged: (Int) -> Unit,
     onProgress: (Int) -> Unit,
     onToggleControls: () -> Unit,
-    safeTopPadding: Dp,
     jumpRequest: ReaderJumpRequest?,
     onJumpConsumed: (ReaderJumpRequest) -> Unit,
     onPositionChanged: (Int, Int) -> Unit,
@@ -533,7 +571,7 @@ private fun ScrollingReader(
         contentPadding = PaddingValues(
             start = preferences.horizontalPadding.dp,
             end = preferences.horizontalPadding.dp,
-            top = safeTopPadding + 8.dp,
+            top = 8.dp,
             bottom = 12.dp,
         ),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -614,6 +652,7 @@ private fun ReaderIllustration(block: ReaderBlock.Illustration, modifier: Modifi
 @Composable
 private fun BoxScope.ReaderControls(
     bookTitle: String,
+    chapterTitle: String,
     colors: ReaderColors,
     onBack: () -> Unit,
     onCatalog: () -> Unit,
@@ -630,7 +669,12 @@ private fun BoxScope.ReaderControls(
         mutableFloatStateOf(position.current.toFloat())
     }
     TopAppBar(
-        title = { Text(bookTitle) },
+        title = {
+            Column {
+                Text(bookTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(chapterTitle, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
         navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
         actions = { TextButton(onClick = onCatalog) { Text("目录") } },
         colors = TopAppBarDefaults.topAppBarColors(
@@ -710,7 +754,7 @@ private fun ReaderJumpDialog(
 }
 
 @Composable
-private fun ReaderSettingsDialog(
+internal fun ReaderSettingsDialog(
     preferences: ReaderPreferences,
     onChange: (ReaderPreferences) -> Unit,
     onDismiss: () -> Unit,
@@ -720,7 +764,21 @@ private fun ReaderSettingsDialog(
         confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
         title = { Text("阅读设置") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("简繁转换")
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ReaderChineseScript.entries.forEach { script ->
+                        ReaderOptionChip(
+                            selected = preferences.chineseScript == script,
+                            onClick = { onChange(preferences.copy(chineseScript = script)) },
+                            label = script.label,
+                        )
+                    }
+                }
+                Text("仅转换阅读文字，原文与链接保持不变", style = MaterialTheme.typography.bodySmall)
                 Text("翻页方式")
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     ReaderMode.entries.forEach { mode ->
