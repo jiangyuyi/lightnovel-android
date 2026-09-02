@@ -175,6 +175,13 @@ enum class ReaderMode(val label: String) {
 }
 
 @Serializable
+enum class ReaderChineseScript(val label: String) {
+    ORIGINAL("原文"),
+    SIMPLIFIED("简体"),
+    TRADITIONAL("繁体"),
+}
+
+@Serializable
 data class ReaderPreferences(
     val font: ReaderFont = ReaderFont.SERIF,
     val fontSize: Float = 19f,
@@ -182,6 +189,7 @@ data class ReaderPreferences(
     val horizontalPadding: Int = 22,
     val theme: ReaderTheme = ReaderTheme.SEPIA,
     val mode: ReaderMode = ReaderMode.PAGED,
+    val chineseScript: ReaderChineseScript = ReaderChineseScript.ORIGINAL,
 )
 
 @Serializable

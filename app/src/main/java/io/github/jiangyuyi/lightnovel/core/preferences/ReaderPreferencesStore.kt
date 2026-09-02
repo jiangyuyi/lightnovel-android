@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import io.github.jiangyuyi.lightnovel.core.model.LocalReadingProgress
 import io.github.jiangyuyi.lightnovel.core.model.ReaderFont
+import io.github.jiangyuyi.lightnovel.core.model.ReaderChineseScript
 import io.github.jiangyuyi.lightnovel.core.model.ReaderMode
 import io.github.jiangyuyi.lightnovel.core.model.ReaderPreferences
 import io.github.jiangyuyi.lightnovel.core.model.ReaderTheme
@@ -25,6 +26,7 @@ class ReaderPreferencesStore(private val context: Context) {
             horizontalPadding = (values[PADDING] ?: 22).coerceIn(12, 40),
             theme = enumValueOrDefault(values[THEME], ReaderTheme.SEPIA),
             mode = enumValueOrDefault(values[MODE], ReaderMode.PAGED),
+            chineseScript = enumValueOrDefault(values[CHINESE_SCRIPT], ReaderChineseScript.ORIGINAL),
         )
     }
 
@@ -36,6 +38,7 @@ class ReaderPreferencesStore(private val context: Context) {
             values[PADDING] = value.horizontalPadding.coerceIn(12, 40)
             values[THEME] = value.theme.name
             values[MODE] = value.mode.name
+            values[CHINESE_SCRIPT] = value.chineseScript.name
         }
     }
 
@@ -66,5 +69,6 @@ class ReaderPreferencesStore(private val context: Context) {
         val PADDING = intPreferencesKey("horizontal_padding")
         val THEME = stringPreferencesKey("theme")
         val MODE = stringPreferencesKey("reader_mode")
+        val CHINESE_SCRIPT = stringPreferencesKey("reader_chinese_script")
     }
 }

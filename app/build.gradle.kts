@@ -37,8 +37,8 @@ android {
         applicationId = "io.github.jiangyuyi.lightnovel"
         minSdk = 26
         targetSdk = 35
-        versionCode = providers.environmentVariable("APP_VERSION_CODE").orNull?.toIntOrNull() ?: 8
-        versionName = providers.environmentVariable("APP_VERSION_NAME").orNull ?: "1.4.1"
+        versionCode = providers.environmentVariable("APP_VERSION_CODE").orNull?.toIntOrNull() ?: 9
+        versionName = providers.environmentVariable("APP_VERSION_NAME").orNull ?: "1.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -115,6 +115,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.chromium.net:cronet-embedded:143.7445.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("com.github.houbb:opencc4j:1.14.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

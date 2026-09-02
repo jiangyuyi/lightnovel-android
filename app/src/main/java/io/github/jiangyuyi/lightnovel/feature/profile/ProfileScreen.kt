@@ -28,9 +28,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import io.github.jiangyuyi.lightnovel.BuildConfig
 import io.github.jiangyuyi.lightnovel.core.model.Session
 import io.github.jiangyuyi.lightnovel.core.ui.ErrorPane
 import io.github.jiangyuyi.lightnovel.core.ui.LoadingPane
@@ -149,6 +151,13 @@ fun ProfileScreen(
                 Text("说明", style = MaterialTheme.typography.titleMedium)
                 Text("这是使用轻之国度当前公开 Web API 的非官方客户端，接口可能随网站升级而变化。")
                 Text("评论当前为只读；完整写作工作台和社区发布功能仍在后续版本评估中。")
+                Text(
+                    text = "版本 ${BuildConfig.VERSION_NAME}",
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
                 Spacer(Modifier.height(18.dp))
             }
         }
