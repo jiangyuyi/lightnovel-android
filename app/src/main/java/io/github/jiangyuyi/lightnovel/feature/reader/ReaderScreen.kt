@@ -234,6 +234,15 @@ fun ReaderScreen(viewModel: ReaderViewModel, onBack: () -> Unit, onCatalog: () -
                     }
                 }
             }
+            if (state.chapter != null && state.error == null) {
+                ReaderStatusFooter(
+                    current = readerPosition.current,
+                    total = readerPosition.total,
+                    paged = state.preferences.mode == ReaderMode.PAGED,
+                    textColor = colors.text,
+                    horizontalPadding = state.preferences.horizontalPadding,
+                )
+            }
         }
 
         if (state.refreshing || converting) {
@@ -507,14 +516,6 @@ private fun PagedReader(
             }
         }
 
-        if (pagerState.currentPage < pages.size) {
-            Text(
-                text = "${pagerState.currentPage + 1} / ${pages.size.coerceAtLeast(1)}",
-                color = colors.text.copy(alpha = 0.55f),
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp),
-            )
-        }
     }
 }
 
@@ -669,6 +670,7 @@ private fun BoxScope.ReaderControls(
         mutableFloatStateOf(position.current.toFloat())
     }
     TopAppBar(
+        windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
         title = {
             Column {
                 Text(bookTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -922,17 +924,24 @@ private fun readerSliderColors() = SliderDefaults.colors(
 @Composable
 private fun ImmersiveReaderEffect(darkBackground: Boolean) {
     val view = LocalView.current
-    DisposableEffect(view, darkBackground) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(view, darkBackground, lifecycleOwner) {
         val window = view.context.findActivity()?.window
         val controller = window?.let { WindowCompat.getInsetsController(it, view) }
         val previousLightStatusBars = controller?.isAppearanceLightStatusBars
+        val previousBehavior = controller?.systemBarsBehavior
         controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        controller?.show(WindowInsetsCompat.Type.statusBars())
-        controller?.hide(WindowInsetsCompat.Type.navigationBars())
+        controller?.hide(WindowInsetsCompat.Type.systemBars())
         controller?.isAppearanceLightStatusBars = !darkBackground
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) controller?.hide(WindowInsetsCompat.Type.systemBars())
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             controller?.show(WindowInsetsCompat.Type.systemBars())
             previousLightStatusBars?.let { controller?.isAppearanceLightStatusBars = it }
+            previousBehavior?.let { controller?.systemBarsBehavior = it }
         }
     }
 }
