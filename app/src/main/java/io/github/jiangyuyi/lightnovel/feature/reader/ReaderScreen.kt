@@ -670,6 +670,7 @@ private fun BoxScope.ReaderControls(
         mutableFloatStateOf(position.current.toFloat())
     }
     TopAppBar(
+        windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
         title = {
             Column {
                 Text(bookTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
