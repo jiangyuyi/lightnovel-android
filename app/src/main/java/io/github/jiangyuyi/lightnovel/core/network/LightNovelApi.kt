@@ -24,10 +24,10 @@ class LightNovelApi internal constructor(
         return response.body
     }
 
-    suspend fun post(path: String, body: JsonObject, commentApi: Boolean = false): JsonObject =
+    suspend fun post(path: String, body: JsonObject, commentApi: Boolean = false, retryConnections: Boolean = true): JsonObject =
         run {
             val base = if (commentApi) COMMENT_BASE_URL else WEB_BFF_BASE_URL
-            val response = transport.postJson(base + path.removePrefix("/"), body.toString())
+            val response = transport.postJson(base + path.removePrefix("/"), body.toString(), retryConnections)
             val raw = response.body
             if (response.code !in 200..299) {
                 throw ApiException("服务器返回 ${response.code}", response.code)

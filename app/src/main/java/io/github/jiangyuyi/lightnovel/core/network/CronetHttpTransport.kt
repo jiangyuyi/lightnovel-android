@@ -33,7 +33,7 @@ internal data class HttpBytesResponse(
 )
 
 internal interface HttpTransport {
-    suspend fun postJson(url: String, body: String): HttpResponse
+    suspend fun postJson(url: String, body: String, retryConnections: Boolean = true): HttpResponse
     suspend fun getBytes(url: String): HttpBytesResponse
 }
 
@@ -70,14 +70,14 @@ internal class CronetHttpTransport(context: Context) : HttpTransport {
     private fun engineFor(route: NetworkRoute): CronetEngine =
         engines.getOrPut(route) { createEngine(route) }
 
-    override suspend fun postJson(url: String, body: String): HttpResponse {
-        val response = request(url, "POST", body.toByteArray(Charsets.UTF_8))
+    override suspend fun postJson(url: String, body: String, retryConnections: Boolean): HttpResponse {
+        val response = request(url, "POST", body.toByteArray(Charsets.UTF_8), retryConnections)
         return HttpResponse(response.code, response.body.toString(Charsets.UTF_8), response.protocol)
     }
 
     override suspend fun getBytes(url: String): HttpBytesResponse = request(url, "GET", null)
 
-    private suspend fun request(url: String, method: String, upload: ByteArray?): HttpBytesResponse {
+    private suspend fun request(url: String, method: String, upload: ByteArray?, retryConnections: Boolean = true): HttpBytesResponse {
         var lastFailure: IOException? = null
         NETWORK_ROUTES.forEachIndexed { index, route ->
             try {
@@ -88,7 +88,7 @@ internal class CronetHttpTransport(context: Context) : HttpTransport {
                 }
             } catch (failure: IOException) {
                 lastFailure = failure
-                if (index == NETWORK_ROUTES.lastIndex || !failure.isRetryableConnectionFailure()) {
+                if (!retryConnections || index == NETWORK_ROUTES.lastIndex || !failure.isRetryableConnectionFailure()) {
                     throw failure
                 }
                 Log.w(

@@ -45,6 +45,7 @@ import io.github.jiangyuyi.lightnovel.feature.discover.DiscoverScreen
 import io.github.jiangyuyi.lightnovel.feature.discover.DiscoverViewModel
 import io.github.jiangyuyi.lightnovel.feature.profile.ProfileScreen
 import io.github.jiangyuyi.lightnovel.feature.profile.ProfileViewModel
+import io.github.jiangyuyi.lightnovel.feature.profile.WelfareViewModel
 import io.github.jiangyuyi.lightnovel.feature.messages.DmThreadScreen
 import io.github.jiangyuyi.lightnovel.feature.messages.DmThreadViewModel
 import io.github.jiangyuyi.lightnovel.feature.messages.MessagesScreen
@@ -144,8 +145,12 @@ private fun LightNovelApp() {
             }
             composable(Routes.PROFILE) {
                 val vm: ProfileViewModel = viewModel(factory = viewModelFactory { ProfileViewModel(container.repository) })
+                val welfareVm: WelfareViewModel = viewModel(key = "welfare-${session.uid}-${session.loggedIn}", factory = viewModelFactory {
+                    WelfareViewModel(container.repository::welfareSign, container.repository::claimWelfareSign)
+                })
                 ProfileScreen(
                     viewModel = vm,
+                    welfareViewModel = welfareVm,
                     session = session,
                     onLogin = { navController.navigate(Routes.AUTH) },
                     onLogout = appViewModel::logout,

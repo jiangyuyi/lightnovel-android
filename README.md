@@ -19,6 +19,7 @@
 - 书籍详情、同书其他版本、分卷和章节目录。
 - 登录后加入/移出书架、我的书架。
 - 登录用户个人概览：头像、UID、用户组、轻币、关注/粉丝/发布统计。
+- 签到领轻币：从“我的”入口或轻币数字查看每日签到、七日奖励、余额与今日收益；手动领取后核对服务器状态，官方 App 已签到时不能重复领取。首次实际到账尚待真机验证，其他福利任务未迁移；接入及验收记录见 [签到说明](docs/WELFARE_SIGN_IN.md)。
 - 关注与粉丝列表、关系状态、分页加载及带确认的关注切换。
 - 云端阅读记录、续读跳转和带确认的单条删除。
 - 发布管理：作品状态、审核进度、卷章/字数和公开详情跳转。
@@ -115,8 +116,8 @@ app/build/outputs/apk/release/app-release.apk
 `.github/workflows/release.yml` 会在推送 `v*` 标签时执行测试、Lint、签名构建、`apksigner` 验证，并发布 APK 与 SHA-256 校验文件：
 
 ```powershell
-git tag v1.6.0
-git push origin v1.6.0
+git tag v1.7.0
+git push origin v1.7.0
 ```
 
 也可以在 GitHub Actions 页面手动运行 `Android Release` 并填写版本标签。
