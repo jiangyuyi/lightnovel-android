@@ -35,6 +35,8 @@ import io.github.jiangyuyi.lightnovel.core.network.jsonBody
 import io.github.jiangyuyi.lightnovel.core.network.long
 import io.github.jiangyuyi.lightnovel.core.network.obj
 import io.github.jiangyuyi.lightnovel.core.network.string
+import io.github.jiangyuyi.lightnovel.core.network.parseWelfareSign
+import io.github.jiangyuyi.lightnovel.core.model.WelfareSign
 import io.github.jiangyuyi.lightnovel.core.session.SessionStore
 import java.security.MessageDigest
 import java.util.UUID
@@ -515,6 +517,15 @@ class LightNovelRepository(
         val key = requireSession()
         val data = api.post("api/bff/my-home-v1", jsonBody("security_key" to key))
         return ApiParsers.accountProfile(data)
+    }
+
+    suspend fun welfareSign(): WelfareSign = parseWelfareSign(
+        api.post("api/bff/welfare-home-v1", jsonBody("security_key" to requireSession())),
+    )
+
+    suspend fun claimWelfareSign() {
+        api.post("api/bff/claim-welfare-sign-v1", jsonBody("security_key" to requireSession()), retryConnections = false)
+        cache.removePrefix(userScope(), cachePrefix("profile"))
     }
 
     suspend fun following(page: Int = 1, pageSize: Int = 20): Page<SocialUser> =

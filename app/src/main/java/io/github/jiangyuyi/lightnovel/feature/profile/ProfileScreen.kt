@@ -23,6 +23,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,6 +45,7 @@ import io.github.jiangyuyi.lightnovel.core.ui.RefreshStatus
 @Composable
 fun ProfileScreen(
     viewModel: ProfileViewModel,
+    welfareViewModel: WelfareViewModel,
     session: Session,
     onLogin: () -> Unit,
     onLogout: () -> Unit,
@@ -53,7 +57,15 @@ fun ProfileScreen(
     onMessages: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var showWelfare by remember(session.uid, session.loggedIn) { mutableStateOf(false) }
     LaunchedEffect(session.loggedIn) { viewModel.refresh(session.loggedIn) }
+
+    if (showWelfare && session.loggedIn) {
+        WelfareDialog(welfareViewModel) {
+            showWelfare = false
+            viewModel.refresh(true, true)
+        }
+    }
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
@@ -128,10 +140,11 @@ fun ProfileScreen(
                             ProfileStat("关注", profile.followingCount, onFollowing)
                             ProfileStat("粉丝", profile.fansCount, onFollowers)
                             ProfileStat("发布", profile.postCount, onPublishing)
-                            ProfileStat("轻币", profile.coin, null)
+                            ProfileStat("轻币", profile.coin) { showWelfare = true }
                         }
                     }
                     Text("个人功能", style = MaterialTheme.typography.titleMedium)
+                    ProfileEntry("签到领轻币", "每日签到、七日奖励与轻币余额", { showWelfare = true })
                     ProfileEntry(
                         "消息中心",
                         "回复、@、点赞、粉丝、系统与私信",
