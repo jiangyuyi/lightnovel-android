@@ -15,6 +15,36 @@ class CachedDataSourceTest {
     private val serializer = BookSummary.serializer()
 
     @Test
+    fun welfareSnapshotSurvivesDataSourceRecreationAndStaysAccountScoped() = runTest {
+        val store = FakeCacheStore()
+        val sign = io.github.jiangyuyi.lightnovel.core.model.WelfareSign(
+            645, 177, "签到", "七天一轮", true, false, "今日已领取",
+            (1..7).map { io.github.jiangyuyi.lightnovel.core.model.SignDay(it, 100 + it, it == 1, false) },
+            currentDay = 1, serverDate = "2026-09-27",
+        )
+        val signSerializer = io.github.jiangyuyi.lightnovel.core.model.WelfareSign.serializer()
+        CachedDataSource(store, json) { 100 }.updates(
+            "user:1", "welfare", CachePolicies.USER_FAST, signSerializer, forceRefresh = true,
+        ) { sign }.toList()
+        val reopened = CachedDataSource(store, json) { 10_000_000_000 }
+        val updates = reopened.updates(
+            "user:1", "welfare", CachePolicies.USER_FAST, signSerializer, forceRefresh = true,
+        ) { throw java.io.IOException("offline") }.toList()
+        assertEquals(listOf(sign, sign), updates.map { it.data })
+        assertEquals(7, updates.first().data.days.size)
+        assertEquals(100L, updates.last().savedAtMillis)
+        assertNotNull(updates.last().error)
+        val other = reopened.updates(
+            "user:2", "welfare", CachePolicies.USER_FAST, signSerializer, forceRefresh = true,
+        ) { sign.copy(coin = 9) }.toList()
+        assertEquals(1, other.size)
+        assertEquals(CacheSource.NETWORK, other.single().source)
+        assertEquals(9, other.single().data.coin)
+        reopened.clearPrivate()
+        assertTrue(store.entries.isEmpty())
+    }
+
+    @Test
     fun freshCacheIsReturnedWithoutNetworkRequest() = runTest {
         val store = FakeCacheStore().apply { putBook("public", "book", oldBook, savedAt = 900) }
         var fetchCount = 0

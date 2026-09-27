@@ -35,6 +35,8 @@ import io.github.jiangyuyi.lightnovel.core.network.jsonBody
 import io.github.jiangyuyi.lightnovel.core.network.long
 import io.github.jiangyuyi.lightnovel.core.network.obj
 import io.github.jiangyuyi.lightnovel.core.network.string
+import io.github.jiangyuyi.lightnovel.core.network.parseWelfareSign
+import io.github.jiangyuyi.lightnovel.core.model.WelfareSign
 import io.github.jiangyuyi.lightnovel.core.session.SessionStore
 import java.security.MessageDigest
 import java.util.UUID
@@ -515,6 +517,31 @@ class LightNovelRepository(
         val key = requireSession()
         val data = api.post("api/bff/my-home-v1", jsonBody("security_key" to key))
         return ApiParsers.accountProfile(data)
+    }
+
+    fun welfareSignUpdates(): Flow<CacheUpdate<WelfareSign>> = cache.updates(
+        scope = userScope(),
+        key = cacheKey("welfare-sign"),
+        policy = CachePolicies.USER_FAST,
+        serializer = WelfareSign.serializer(),
+        // Always revalidate eligibility; TTL never authorizes a cached claim.
+        forceRefresh = true,
+        fetch = ::welfareSign,
+    )
+
+    suspend fun welfareSign(): WelfareSign {
+        val body = jsonBody("security_key" to requireSession())
+        return parseWelfareSign(api.post("api/bff/welfare-home-v1", body, welfareApi = true))
+    }
+
+    suspend fun claimWelfareSign() {
+        // Refresh eligibility and establish a working domain connection before a
+        // non-retryable mutation. No reward request is sent if this read fails.
+        val current = welfareSign()
+        if (current.claimed) return
+        if (!current.claimable) throw io.github.jiangyuyi.lightnovel.core.network.ApiException("当前暂不可领取，请刷新签到状态")
+        api.post("api/bff/claim-welfare-sign-v1", jsonBody("security_key" to requireSession()), retryConnections = false, welfareApi = true)
+        cache.removePrefix(userScope(), cachePrefix("profile"))
     }
 
     suspend fun following(page: Int = 1, pageSize: Int = 20): Page<SocialUser> =
