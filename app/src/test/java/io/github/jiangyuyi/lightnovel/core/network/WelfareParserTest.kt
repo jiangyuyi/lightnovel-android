@@ -8,6 +8,13 @@ import org.junit.Test
 class WelfareParserTest {
     private fun parse(raw: String) = parseWelfareSign(Json.parseToJsonElement(raw) as JsonObject)
 
+    @Test fun `cycle and day are taken from server rather than device date`() {
+        val result = parse("""{"server_time":"2026-09-27 01:19:30","sign_in":{"current_day":1,"cycle_start_date":"2026-09-27","enabled":1,"claimable":1}}""")
+        assertEquals(1, result.currentDay)
+        assertEquals("2026-09-27", result.cycleStartDate)
+        assertEquals("2026-09-27", result.serverDate)
+    }
+
     @Test fun `server reward amounts and zero balance are preserved`() {
         val result = parse("""{"wallet":{"coin":0,"today_coin":0},"sign_in":{"enabled":1,"claimable":1,"claimed":0,"button_text":"领取","rewards":[{"day":1,"reward_amount":138,"claimable":1},{"day":2,"reward_amount":154}]}}""")
         assertEquals(0, result.coin)

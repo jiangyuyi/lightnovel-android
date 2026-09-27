@@ -83,4 +83,74 @@ class WelfareViewModelTest {
         assertFalse(vm.state.value.verified)
         assertNotNull(vm.state.value.error)
     }
+
+    @Test fun `advanced day without confirmed claim stays blocked after refresh`() = runTest(dispatcher) {
+        var day = 2
+        var claims = 0
+        val vm = WelfareViewModel(
+            { data().copy(currentDay = day, serverDate = "2026-09-27") },
+            { claims++; day++; throw IOException("ERR_QUIC_PROTOCOL_ERROR") },
+        )
+        vm.refresh()
+        advanceUntilIdle()
+        vm.signIn()
+        advanceUntilIdle()
+        assertFalse(vm.state.value.verified)
+        assertTrue(vm.state.value.error!!.contains("签到天数发生变化"))
+        vm.refresh()
+        advanceUntilIdle()
+        vm.signIn()
+        advanceUntilIdle()
+        assertFalse(vm.state.value.verified)
+        assertEquals(1, claims)
+    }
+
+    @Test fun `network failure with unchanged day requires explicit refresh`() = runTest(dispatcher) {
+        val vm = WelfareViewModel({ data() }, { throw IOException("ERR_QUIC_PROTOCOL_ERROR") })
+        vm.refresh()
+        advanceUntilIdle()
+        vm.signIn()
+        advanceUntilIdle()
+        assertFalse(vm.state.value.verified)
+        assertFalse(vm.state.value.error!!.contains("QUIC"))
+    }
+
+    @Test fun `next server date unlocks an inconsistent claim`() = runTest(dispatcher) {
+        var day = 2
+        var date = "2026-09-27"
+        val vm = WelfareViewModel(
+            { data().copy(currentDay = day, serverDate = date) },
+            { day++ },
+        )
+        vm.refresh()
+        advanceUntilIdle()
+        vm.signIn()
+        advanceUntilIdle()
+        assertFalse(vm.state.value.verified)
+        date = "2026-09-28"
+        vm.refresh()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.verified)
+        assertNull(vm.state.value.error)
+    }
+
+    @Test fun `failed refresh clears a previous successful claim message`() = runTest(dispatcher) {
+        var claimed = false
+        var offline = false
+        val vm = WelfareViewModel(
+            { if (offline) throw IOException("offline") else data(claimed) },
+            { claimed = true },
+        )
+        vm.refresh()
+        advanceUntilIdle()
+        vm.signIn()
+        advanceUntilIdle()
+        assertNotNull(vm.state.value.message)
+        offline = true
+        vm.refresh()
+        assertNull(vm.state.value.message)
+        advanceUntilIdle()
+        assertNull(vm.state.value.message)
+        assertNotNull(vm.state.value.error)
+    }
 }

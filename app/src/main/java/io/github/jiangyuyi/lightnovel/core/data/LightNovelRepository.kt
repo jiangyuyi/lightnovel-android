@@ -519,12 +519,18 @@ class LightNovelRepository(
         return ApiParsers.accountProfile(data)
     }
 
-    suspend fun welfareSign(): WelfareSign = parseWelfareSign(
-        api.post("api/bff/welfare-home-v1", jsonBody("security_key" to requireSession())),
-    )
+    suspend fun welfareSign(): WelfareSign {
+        val body = jsonBody("security_key" to requireSession())
+        return parseWelfareSign(api.post("api/bff/welfare-home-v1", body, welfareApi = true))
+    }
 
     suspend fun claimWelfareSign() {
-        api.post("api/bff/claim-welfare-sign-v1", jsonBody("security_key" to requireSession()), retryConnections = false)
+        // Refresh eligibility and establish a working domain connection before a
+        // non-retryable mutation. No reward request is sent if this read fails.
+        val current = welfareSign()
+        if (current.claimed) return
+        if (!current.claimable) throw io.github.jiangyuyi.lightnovel.core.network.ApiException("当前暂不可领取，请刷新签到状态")
+        api.post("api/bff/claim-welfare-sign-v1", jsonBody("security_key" to requireSession()), retryConnections = false, welfareApi = true)
         cache.removePrefix(userScope(), cachePrefix("profile"))
     }
 

@@ -11,4 +11,7 @@ data class WelfareSign(
     val claimable: Boolean,
     val buttonText: String,
     val days: List<SignDay>,
+    val currentDay: Int = 0,
+    val cycleStartDate: String = "",
+    val serverDate: String = "",
 )

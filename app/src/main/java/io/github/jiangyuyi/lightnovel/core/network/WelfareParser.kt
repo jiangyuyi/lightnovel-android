@@ -19,6 +19,9 @@ internal fun parseWelfareSign(data: JsonObject): WelfareSign {
         claimed = claimed,
         claimable = sign.bool("enabled") == true && sign.bool("claimable") == true && !claimed,
         buttonText = if (claimed) "今日已领取" else sign.string("button_text").ifBlank { "暂不可领取" },
+        currentDay = sign.int("current_day"),
+        cycleStartDate = sign.string("cycle_start_date"),
+        serverDate = data.string("server_time").take(10),
         days = sign.array("rewards").mapNotNull { item ->
             val day = item as? JsonObject ?: return@mapNotNull null
             if (day.int("day") <= 0) return@mapNotNull null

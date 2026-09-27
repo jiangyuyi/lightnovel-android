@@ -43,32 +43,29 @@ internal class CronetHttpTransport(context: Context) : HttpTransport {
         Thread(runnable, "lightnovel-cronet").apply { isDaemon = true }
     }
 
-    private val engines = mutableMapOf<NetworkRoute, CronetEngine>()
+    private val engines = mutableMapOf<NetworkProtocol, CronetEngine>()
+    private val connectionPreferences = NetworkConnectionPreferences()
 
-    private fun createEngine(route: NetworkRoute): CronetEngine =
+    private fun createEngine(protocol: NetworkProtocol): CronetEngine =
         ExperimentalCronetEngine.Builder(applicationContext).run {
-        enableQuic(true)
-        enableHttp2(true)
+        // Every engine follows system DNS and the site's current CDN. Fallbacks
+        // change transport protocol, never map a hostname to a static address.
+        enableQuic(protocol == NetworkProtocol.AUTO)
+        enableHttp2(protocol != NetworkProtocol.HTTP1)
         enableBrotli(true)
         // Mainland TCP routes to these hosts are unreliable on some networks. Try
         // QUIC immediately, but let system DNS follow the site's current CDN first.
-        addQuicHint("www.lightnovel.fun", 443, 443)
-        addQuicHint("api.lightnovel.fun", 443, 443)
-        addQuicHint("res.lightnovel.fun", 443, 443)
-        // These legacy Cloudflare routes are fallbacks only. The site currently
-        // resolves through another CDN, so forcing them for every request causes
-        // image TLS handshakes to be reset while the same URL works in a browser.
-        route.address?.let { address ->
-            setExperimentalOptions(
-                """{"HostResolverRules":{"host_resolver_rules":"MAP www.lightnovel.fun $address, MAP api.lightnovel.fun $address, MAP res.lightnovel.fun $address"}}""",
-            )
+        if (protocol == NetworkProtocol.AUTO) {
+            addQuicHint("www.lightnovel.fun", 443, 443)
+            addQuicHint("api.lightnovel.fun", 443, 443)
+            addQuicHint("res.lightnovel.fun", 443, 443)
         }
         build()
     }
 
     @Synchronized
-    private fun engineFor(route: NetworkRoute): CronetEngine =
-        engines.getOrPut(route) { createEngine(route) }
+    private fun engineFor(protocol: NetworkProtocol): CronetEngine =
+        engines.getOrPut(protocol) { createEngine(protocol) }
 
     override suspend fun postJson(url: String, body: String, retryConnections: Boolean): HttpResponse {
         val response = request(url, "POST", body.toByteArray(Charsets.UTF_8), retryConnections)
@@ -79,21 +76,25 @@ internal class CronetHttpTransport(context: Context) : HttpTransport {
 
     private suspend fun request(url: String, method: String, upload: ByteArray?, retryConnections: Boolean = true): HttpBytesResponse {
         var lastFailure: IOException? = null
-        NETWORK_ROUTES.forEachIndexed { index, route ->
+        val host = Uri.parse(url).host.orEmpty()
+        val protocols = connectionPreferences.attemptsFor(host, retryConnections)
+        protocols.forEachIndexed { index, protocol ->
             try {
-                return executeWithTimeout(engineFor(route), url, method, upload).also {
+                return executeWithTimeout(engineFor(protocol), url, method, upload).also {
+                    connectionPreferences.recordSuccess(host, protocol)
                     if (index > 0) {
-                        Log.i(TAG, "${Uri.parse(url).host} connected through ${route.label}")
+                        Log.i(TAG, "$host connected through $protocol using system DNS")
                     }
                 }
             } catch (failure: IOException) {
+                connectionPreferences.recordFailure(host, protocol)
                 lastFailure = failure
-                if (!retryConnections || index == NETWORK_ROUTES.lastIndex || !failure.isRetryableConnectionFailure()) {
+                if (!retryConnections || index == protocols.lastIndex || !failure.isRetryableConnectionFailure()) {
                     throw failure
                 }
                 Log.w(
                     TAG,
-                    "${Uri.parse(url).host} failed through ${route.label}; trying fallback",
+                    "$host failed through $protocol; trying another connection using system DNS",
                     failure,
                 )
             }
@@ -205,13 +206,6 @@ internal class CronetHttpTransport(context: Context) : HttpTransport {
         const val TAG = "LightNovelNetwork"
         const val ROUTE_TIMEOUT_MS = 12_000L
 
-        val NETWORK_ROUTES = listOf(
-            NetworkRoute("system DNS"),
-            NetworkRoute("legacy Cloudflare 1", "104.26.6.43"),
-            NetworkRoute("legacy Cloudflare 2", "104.26.7.43"),
-            NetworkRoute("legacy Cloudflare 3", "172.67.73.171"),
-        )
-
         val RETRYABLE_NETWORK_ERRORS = listOf(
             "ERR_CONNECTION_RESET",
             "ERR_QUIC_PROTOCOL_ERROR",
@@ -222,10 +216,5 @@ internal class CronetHttpTransport(context: Context) : HttpTransport {
         )
     }
 }
-
-private data class NetworkRoute(
-    val label: String,
-    val address: String? = null,
-)
 
 private class RouteTimeoutException(cause: Throwable) : IOException("网络请求超时", cause)
