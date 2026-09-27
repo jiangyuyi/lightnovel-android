@@ -2,12 +2,17 @@ package io.github.jiangyuyi.lightnovel.feature.profile
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.jiangyuyi.lightnovel.core.cache.CacheSource
+import io.github.jiangyuyi.lightnovel.core.cache.CacheUpdate
 import io.github.jiangyuyi.lightnovel.core.model.WelfareSign
 import io.github.jiangyuyi.lightnovel.core.network.ApiException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.last
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 
 data class WelfareState(
@@ -15,6 +20,8 @@ data class WelfareState(
     val loading: Boolean = false,
     val claiming: Boolean = false,
     val verified: Boolean = false,
+    val cached: Boolean = false,
+    val savedAtMillis: Long? = null,
     val message: String? = null,
     val error: String? = null,
 )
@@ -22,6 +29,9 @@ data class WelfareState(
 class WelfareViewModel(
     private val load: suspend () -> WelfareSign,
     private val claim: suspend () -> Unit,
+    private val updates: () -> Flow<CacheUpdate<WelfareSign>> = {
+        flow { emit(CacheUpdate(load(), CacheSource.NETWORK, savedAtMillis = System.currentTimeMillis())) }
+    },
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(WelfareState())
     val state = mutableState.asStateFlow()
@@ -33,15 +43,19 @@ class WelfareViewModel(
         mutableState.value = mutableState.value.copy(loading = true, verified = false, message = null, error = null)
         job = viewModelScope.launch {
             try {
-                val latest = load()
-                if (latest.claimed || (!inconsistentClaimDate.isNullOrBlank() && latest.serverDate.isNotBlank() && latest.serverDate != inconsistentClaimDate)) {
-                    inconsistentClaimDate = null
+                updates().collect { update ->
+                    val latest = update.data
+                    val live = update.source == CacheSource.NETWORK && update.error == null
+                    if (live && (latest.claimed || (!inconsistentClaimDate.isNullOrBlank() && latest.serverDate.isNotBlank() && latest.serverDate != inconsistentClaimDate))) {
+                        inconsistentClaimDate = null
+                    }
+                    mutableState.value = mutableState.value.copy(
+                        data = latest, loading = update.refreshing, verified = live && inconsistentClaimDate == null,
+                        cached = !live, savedAtMillis = update.savedAtMillis, message = null,
+                        error = update.error?.let { readableError(it) }
+                            ?: if (live && inconsistentClaimDate != null) INCONSISTENT_STATE else null,
+                    )
                 }
-                mutableState.value = mutableState.value.copy(
-                    data = latest, loading = false, verified = inconsistentClaimDate == null,
-                    message = null,
-                    error = if (inconsistentClaimDate != null) INCONSISTENT_STATE else null,
-                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -65,7 +79,12 @@ class WelfareViewModel(
             }
             // Always reconcile with the server, even after a timeout. Never retry a claim automatically.
             try {
-                val latest = load()
+                // The same stream saves the confirmed result for the next cold launch.
+                // Cached snapshots must never reconcile a mutation.
+                val update = updates().last()
+                update.error?.let { throw it }
+                if (update.source != CacheSource.NETWORK) throw java.io.IOException("签到状态尚未确认")
+                val latest = update.data
                 val before = requireNotNull(current.data)
                 val shifted = !latest.claimed && (
                     (before.currentDay > 0 && latest.currentDay > 0 && before.currentDay != latest.currentDay) ||
@@ -75,6 +94,7 @@ class WelfareViewModel(
                 mutableState.value = WelfareState(
                     data = latest,
                     verified = latest.claimed,
+                    savedAtMillis = update.savedAtMillis,
                     message = if (latest.claimed) "今日签到已领取" else null,
                     error = when {
                         latest.claimed -> null
@@ -93,7 +113,7 @@ class WelfareViewModel(
         }
     }
 
-    private fun readableError(e: Exception, claimResultUncertain: Boolean = false): String = when {
+    private fun readableError(e: Throwable, claimResultUncertain: Boolean = false): String = when {
         e is ApiException && e.businessCode == 8 -> "登录已失效，请重新登录后签到"
         e is java.io.IOException && e !is ApiException -> if (claimResultUncertain) {
             "网络连接异常，领取结果需重新查询确认；请勿连续点击领取"

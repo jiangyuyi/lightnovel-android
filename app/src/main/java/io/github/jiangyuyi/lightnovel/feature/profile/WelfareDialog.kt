@@ -22,6 +22,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
 fun WelfareDialog(viewModel: WelfareViewModel, onDismiss: () -> Unit) {
@@ -37,8 +39,14 @@ fun WelfareDialog(viewModel: WelfareViewModel, onDismiss: () -> Unit) {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (state.loading || state.claiming) LinearProgressIndicator(Modifier.fillMaxWidth())
                 state.data?.let { data ->
+                    if (!state.verified) {
+                        Text(
+                            "上次记录${state.savedAtMillis?.let { " · ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))}" } ?: ""}；${if (state.loading) "正在刷新…" else "请刷新确认今日状态"}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                     Text("轻币余额：${data.coin?.toString() ?: "暂不可用"}", style = MaterialTheme.typography.titleMedium)
-                    data.todayCoin?.let { Text("今日收益：$it 轻币") }
+                    data.todayCoin?.let { Text("${if (state.verified) "今日收益" else "上次记录的当日收益"}：$it 轻币") }
                     Text(data.title, fontWeight = FontWeight.Bold)
                     if (data.description.isNotBlank()) Text(data.description)
                     data.days.forEach { day ->
@@ -49,11 +57,11 @@ fun WelfareDialog(viewModel: WelfareViewModel, onDismiss: () -> Unit) {
                             Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("第 ${day.day} 天")
                                 Text("${day.amount} 轻币")
-                                Text(if (day.claimed) "已领取" else if (active) "可领取" else "待签到")
+                                Text(if (day.claimed) "已领取" else if (active) { if (state.verified) "可领取" else "待确认" } else "待签到")
                             }
                         }
                     }
-                    if (data.claimed) Text("今日已领取，明天再来", color = MaterialTheme.colorScheme.primary)
+                    if (data.claimed && state.verified) Text("今日已领取，明天再来", color = MaterialTheme.colorScheme.primary)
                 }
                 state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
                 state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -64,7 +72,12 @@ fun WelfareDialog(viewModel: WelfareViewModel, onDismiss: () -> Unit) {
             Button(
                 onClick = viewModel::signIn,
                 enabled = state.verified && state.data?.claimable == true && !state.loading && !state.claiming,
-            ) { Text(if (state.claiming) "正在领取…" else state.data?.buttonText ?: "签到领取") }
+            ) { Text(when {
+                state.claiming -> "正在领取…"
+                state.loading -> "正在确认…"
+                !state.verified && state.data != null -> "刷新后确认"
+                else -> state.data?.buttonText ?: "签到领取"
+            }) }
         },
         dismissButton = {
             Row {

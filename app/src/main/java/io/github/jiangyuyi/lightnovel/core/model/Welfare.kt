@@ -1,7 +1,11 @@
 package io.github.jiangyuyi.lightnovel.core.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class SignDay(val day: Int, val amount: Int, val claimed: Boolean, val claimable: Boolean)
 
+@Serializable
 data class WelfareSign(
     val coin: Int?,
     val todayCoin: Int?,

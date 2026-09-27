@@ -519,6 +519,16 @@ class LightNovelRepository(
         return ApiParsers.accountProfile(data)
     }
 
+    fun welfareSignUpdates(): Flow<CacheUpdate<WelfareSign>> = cache.updates(
+        scope = userScope(),
+        key = cacheKey("welfare-sign"),
+        policy = CachePolicies.USER_FAST,
+        serializer = WelfareSign.serializer(),
+        // Always revalidate eligibility; TTL never authorizes a cached claim.
+        forceRefresh = true,
+        fetch = ::welfareSign,
+    )
+
     suspend fun welfareSign(): WelfareSign {
         val body = jsonBody("security_key" to requireSession())
         return parseWelfareSign(api.post("api/bff/welfare-home-v1", body, welfareApi = true))

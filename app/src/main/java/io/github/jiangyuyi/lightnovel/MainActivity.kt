@@ -146,7 +146,7 @@ private fun LightNovelApp() {
             composable(Routes.PROFILE) {
                 val vm: ProfileViewModel = viewModel(factory = viewModelFactory { ProfileViewModel(container.repository) })
                 val welfareVm: WelfareViewModel = viewModel(key = "welfare-${session.uid}-${session.loggedIn}", factory = viewModelFactory {
-                    WelfareViewModel(container.repository::welfareSign, container.repository::claimWelfareSign)
+                    WelfareViewModel(container.repository::welfareSign, container.repository::claimWelfareSign, container.repository::welfareSignUpdates)
                 })
                 ProfileScreen(
                     viewModel = vm,

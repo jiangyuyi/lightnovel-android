@@ -1,6 +1,10 @@
 package io.github.jiangyuyi.lightnovel.feature.profile
 
 import io.github.jiangyuyi.lightnovel.core.model.WelfareSign
+import io.github.jiangyuyi.lightnovel.core.cache.CacheSource
+import io.github.jiangyuyi.lightnovel.core.cache.CacheUpdate
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -20,6 +24,73 @@ class WelfareViewModelTest {
     private fun data(claimed: Boolean = false) = WelfareSign(100, 0, "签到", "", claimed, !claimed, "领取", emptyList())
     @Before fun setup() { Dispatchers.setMain(dispatcher) }
     @After fun teardown() { Dispatchers.resetMain() }
+
+    @Test fun `cold opening displays cache while eligibility is being refreshed`() = runTest(dispatcher) {
+        val response = CompletableDeferred<WelfareSign>()
+        var claims = 0
+        val vm = WelfareViewModel({ error("must use cache stream") }, { claims++ }, {
+            flow {
+                emit(CacheUpdate(data(), CacheSource.CACHE, refreshing = true, savedAtMillis = 100))
+                emit(CacheUpdate(response.await(), CacheSource.NETWORK, savedAtMillis = 200))
+            }
+        })
+        vm.refresh()
+        advanceUntilIdle()
+        assertEquals(data(), vm.state.value.data)
+        assertTrue(vm.state.value.loading)
+        assertTrue(vm.state.value.cached)
+        assertFalse(vm.state.value.verified)
+        vm.signIn()
+        assertEquals(0, claims)
+        response.complete(data(true))
+        advanceUntilIdle()
+        assertTrue(vm.state.value.verified)
+        assertFalse(vm.state.value.cached)
+        assertEquals(200L, vm.state.value.savedAtMillis)
+        assertTrue(vm.state.value.data!!.claimed)
+    }
+
+    @Test fun `failed cold refresh retains cached cycle and never authorizes claim`() = runTest(dispatcher) {
+        var claims = 0
+        val old = data().copy(serverDate = "2026-09-26", currentDay = 7)
+        val vm = WelfareViewModel({ error("must use cache stream") }, { claims++ }, {
+            flow {
+                emit(CacheUpdate(old, CacheSource.CACHE, refreshing = true, savedAtMillis = 100))
+                emit(CacheUpdate(old, CacheSource.CACHE, savedAtMillis = 100, error = IOException("offline")))
+            }
+        })
+        vm.refresh()
+        advanceUntilIdle()
+        assertEquals(old, vm.state.value.data)
+        assertFalse(vm.state.value.loading)
+        assertFalse(vm.state.value.verified)
+        assertNotNull(vm.state.value.error)
+        vm.signIn()
+        advanceUntilIdle()
+        assertEquals(0, claims)
+    }
+
+    @Test fun `claim reconciliation ignores cached claimed flag on network failure`() = runTest(dispatcher) {
+        var claims = 0
+        val vm = WelfareViewModel({ error("must use cache stream") }, { claims++ }, {
+            flow {
+                if (claims == 0) emit(CacheUpdate(data(), CacheSource.NETWORK, savedAtMillis = 100))
+                else {
+                    emit(CacheUpdate(data(true), CacheSource.CACHE, refreshing = true, savedAtMillis = 100))
+                    emit(CacheUpdate(data(true), CacheSource.CACHE, savedAtMillis = 100, error = IOException("offline")))
+                }
+            }
+        })
+        vm.refresh()
+        advanceUntilIdle()
+        vm.signIn()
+        advanceUntilIdle()
+        assertEquals(1, claims)
+        assertFalse(vm.state.value.verified)
+        assertFalse(vm.state.value.data!!.claimed)
+        assertNull(vm.state.value.message)
+        assertNotNull(vm.state.value.error)
+    }
 
     @Test fun `duplicate taps submit only once and reconcile balance`() = runTest(dispatcher) {
         var claims = 0
