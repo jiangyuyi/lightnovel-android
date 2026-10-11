@@ -116,8 +116,8 @@ app/build/outputs/apk/release/app-release.apk
 `.github/workflows/release.yml` 会在推送 `v*` 标签时执行测试、Lint、签名构建、`apksigner` 验证，并发布 APK 与 SHA-256 校验文件：
 
 ```powershell
-git tag v1.7.1
-git push origin v1.7.1
+git tag v1.7.2
+git push origin v1.7.2
 ```
 
 也可以在 GitHub Actions 页面手动运行 `Android Release` 并填写版本标签。
