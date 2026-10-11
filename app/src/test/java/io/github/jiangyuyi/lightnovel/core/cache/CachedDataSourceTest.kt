@@ -15,6 +15,83 @@ class CachedDataSourceTest {
     private val serializer = BookSummary.serializer()
 
     @Test
+    fun firstOfflineLaunchShowsBundledTaxonomyAndStillAttemptsNetwork() = runTest {
+        val store = FakeCacheStore()
+        val builtIn = io.github.jiangyuyi.lightnovel.core.model.BuiltInSearchTaxonomy.value
+        var fetchCount = 0
+        val updates = CachedDataSource(store, json) { 1_000 }.updates(
+            "public", "taxonomy", CachePolicies.TAXONOMY,
+            io.github.jiangyuyi.lightnovel.core.model.SearchTaxonomy.serializer(),
+            initialData = builtIn,
+        ) {
+            fetchCount++
+            throw java.io.IOException("offline")
+        }.toList()
+
+        assertEquals(1, fetchCount)
+        assertEquals(listOf(builtIn, builtIn), updates.map { it.data })
+        assertEquals(4, updates.first().data.channels.size)
+        assertEquals(30, updates.first().data.tags.size)
+        assertTrue(updates.first().refreshing)
+        assertFalse(updates.last().refreshing)
+        assertNotNull(updates.last().error)
+        assertTrue(store.entries.isEmpty())
+    }
+
+    @Test
+    fun successfulTaxonomyReplacesBundledSnapshotAndSurvivesOfflineRestart() = runTest {
+        val store = FakeCacheStore()
+        val builtIn = io.github.jiangyuyi.lightnovel.core.model.BuiltInSearchTaxonomy.value
+        val updated = builtIn.copy(channels = builtIn.channels.reversed())
+        val taxonomySerializer = io.github.jiangyuyi.lightnovel.core.model.SearchTaxonomy.serializer()
+        val online = CachedDataSource(store, json) { 1_000 }.updates(
+            "public", "taxonomy", CachePolicies.TAXONOMY, taxonomySerializer,
+            initialData = builtIn,
+        ) { updated }.toList()
+        assertEquals(listOf(builtIn, updated), online.map { it.data })
+        assertEquals(CacheSource.NETWORK, online.last().source)
+
+        val offline = CachedDataSource(store, json) { 100_000_000 }.updates(
+            "public", "taxonomy", CachePolicies.TAXONOMY, taxonomySerializer,
+            initialData = builtIn,
+        ) { throw java.io.IOException("offline") }.toList()
+        assertEquals(listOf(updated, updated), offline.map { it.data })
+        assertNotNull(offline.last().error)
+    }
+
+    @Test
+    fun unreadableTaxonomyCacheFallsBackToBundledSnapshotWhenOffline() = runTest {
+        val store = FakeCacheStore().apply {
+            entries["public\u0000taxonomy"] = SerializedCacheEntry("invalid json", 900)
+        }
+        val builtIn = io.github.jiangyuyi.lightnovel.core.model.BuiltInSearchTaxonomy.value
+        val updates = CachedDataSource(store, json) { 1_000 }.updates(
+            "public", "taxonomy", CachePolicies.TAXONOMY,
+            io.github.jiangyuyi.lightnovel.core.model.SearchTaxonomy.serializer(),
+            initialData = builtIn,
+        ) { throw java.io.IOException("offline") }.toList()
+        assertEquals(listOf(builtIn, builtIn), updates.map { it.data })
+        assertTrue(store.entries.isEmpty())
+    }
+
+    @Test
+    fun freshSavedTaxonomyTakesPriorityOverBundledSnapshotWithoutNetwork() = runTest {
+        val store = FakeCacheStore()
+        val builtIn = io.github.jiangyuyi.lightnovel.core.model.BuiltInSearchTaxonomy.value
+        val updated = builtIn.copy(tags = builtIn.tags.reversed())
+        val taxonomySerializer = io.github.jiangyuyi.lightnovel.core.model.SearchTaxonomy.serializer()
+        store.write("public", "taxonomy", SerializedCacheEntry(
+            json.encodeToString(taxonomySerializer, updated), 900,
+        ), true)
+        val updates = CachedDataSource(store, json) { 1_000 }.updates(
+            "public", "taxonomy", CachePolicies.TAXONOMY, taxonomySerializer,
+            initialData = builtIn,
+        ) { error("Fresh cache must not request network") }.toList()
+        assertEquals(updated, updates.single().data)
+        assertFalse(updates.single().refreshing)
+    }
+
+    @Test
     fun welfareSnapshotSurvivesDataSourceRecreationAndStaysAccountScoped() = runTest {
         val store = FakeCacheStore()
         val sign = io.github.jiangyuyi.lightnovel.core.model.WelfareSign(

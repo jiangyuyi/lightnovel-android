@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import io.github.jiangyuyi.lightnovel.core.data.LightNovelRepository
 import io.github.jiangyuyi.lightnovel.core.model.BookSummary
 import io.github.jiangyuyi.lightnovel.core.model.SearchTaxonomy
+import io.github.jiangyuyi.lightnovel.core.model.BuiltInSearchTaxonomy
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,7 +17,7 @@ data class SearchState(
     val query: String = "",
     val workType: String = "",
     val primaryTag: String = "",
-    val taxonomy: SearchTaxonomy = SearchTaxonomy(emptyList(), emptyList()),
+    val taxonomy: SearchTaxonomy = BuiltInSearchTaxonomy.value,
     val results: List<BookSummary> = emptyList(),
     val loading: Boolean = false,
     val refreshing: Boolean = false,

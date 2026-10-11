@@ -22,6 +22,7 @@ import io.github.jiangyuyi.lightnovel.core.model.ReadingHistoryItem
 import io.github.jiangyuyi.lightnovel.core.model.ReaderBootstrap
 import io.github.jiangyuyi.lightnovel.core.model.ReaderPreferences
 import io.github.jiangyuyi.lightnovel.core.model.SearchTaxonomy
+import io.github.jiangyuyi.lightnovel.core.model.BuiltInSearchTaxonomy
 import io.github.jiangyuyi.lightnovel.core.model.Session
 import io.github.jiangyuyi.lightnovel.core.model.SocialUser
 import io.github.jiangyuyi.lightnovel.core.model.UserSummary
@@ -41,6 +42,7 @@ import io.github.jiangyuyi.lightnovel.core.session.SessionStore
 import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -127,8 +129,19 @@ class LightNovelRepository(
         policy = CachePolicies.TAXONOMY,
         serializer = SearchTaxonomy.serializer(),
         forceRefresh = forceRefresh,
-        fetch = ::taxonomy,
-    )
+        initialData = BuiltInSearchTaxonomy.value,
+        fetch = {
+            taxonomy().also {
+                check(it.channels.isNotEmpty() && it.tags.isNotEmpty()) { "搜索分类返回不完整，保留已有分类" }
+            }
+        },
+    ).map { update ->
+        // Also recover empty/partial entries saved by older versions.
+        update.copy(data = update.data.copy(
+            channels = update.data.channels.ifEmpty { BuiltInSearchTaxonomy.value.channels },
+            tags = update.data.tags.ifEmpty { BuiltInSearchTaxonomy.value.tags },
+        ))
+    }
 
     fun searchUpdates(
         query: String,

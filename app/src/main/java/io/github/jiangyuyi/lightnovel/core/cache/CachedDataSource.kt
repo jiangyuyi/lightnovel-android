@@ -22,11 +22,17 @@ class CachedDataSource(
         policy: CachePolicy,
         serializer: KSerializer<T>,
         forceRefresh: Boolean = false,
+        initialData: T? = null,
         fetch: suspend () -> T,
     ): Flow<CacheUpdate<T>> = flow {
         var cached = read(scope, key, policy, serializer)
         val startedAt = now()
         val cacheIsFresh = cached?.let { policy.isFresh(it.savedAtMillis, startedAt) } == true
+        // A bundled snapshot is a fallback, not a fresh network response. Always fetch
+        // when it is used, and only persist a successful response.
+        if (cached == null && initialData != null) {
+            cached = DecodedCacheEntry(initialData, 0L)
+        }
 
         if (cached != null) {
             emit(
