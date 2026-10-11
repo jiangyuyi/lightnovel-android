@@ -116,8 +116,8 @@ app/build/outputs/apk/release/app-release.apk
 `.github/workflows/release.yml` 会在推送 `v*` 标签时执行测试、Lint、签名构建、`apksigner` 验证，并发布 APK 与 SHA-256 校验文件：
 
 ```powershell
-git tag v1.7.0
-git push origin v1.7.0
+git tag v1.7.1
+git push origin v1.7.1
 ```
 
 也可以在 GitHub Actions 页面手动运行 `Android Release` 并填写版本标签。
@@ -143,9 +143,10 @@ git push origin v1.7.0
 应用只使用 HTTPS：
 
 - Web BFF：`https://www.lightnovel.fun/api/pc-proxy/`
-- 评论读取：`https://api.lightnovel.fun/pc-comment-proxy/`
+- 官方福利代理：`https://api.lightnovel.fun/proxy/`
+- 评论读取及搜索结果连接失败时的备用路径：`https://api.lightnovel.fun/pc-comment-proxy/`
 
-站点没有为本项目提供稳定 SDK，因此 API 可能变化。API 与站点图片统一使用嵌入式 Cronet，优先建立 HTTP/3/QUIC 连接；遇到大陆网络上的可重试连接重置时会重建引擎并轮换备用 CDN 边缘地址。网络层同时集中处理响应信封、历史字段兼容和错误映射。Debug/Release 均不会记录密码、验证码或 `security_key`。
+站点没有为本项目提供稳定 SDK，因此 API 可能变化。API 与站点图片统一使用嵌入式 Cronet，按域名经系统 DNS 使用当前 CDN；连接失败时有限尝试不同传输协议，并只对已验证的只读接口切换兼容代理。不固定 IP 或强制映射旧 CDN 节点。网络层同时集中处理响应信封、历史字段兼容和错误映射。详见 [网络与 CDN 排障](docs/NETWORK_CDN.md)。Debug/Release 均不会记录密码、验证码或 `security_key`。
 
 正文只缓存在当前设备供连续阅读，不随 Git 提交，也不提供整本离线导出。章节正文默认缓存 7 天，并与其他磁盘内容共同受 96 MiB LRU 上限约束。游客阅读设置和位置保存在 DataStore；登录用户的书架、阅读进度和阅读设置会按站点 API 同步。密码、验证码和 `security_key` 不进入内容缓存，退出登录会清理按 UID 隔离的私有缓存。
 
