@@ -34,7 +34,10 @@ class LightNovelApi internal constructor(
                 transport.postJson(base + normalizedPath, body.toString(), retryConnections && !alternateRead)
             } catch (failure: IOException) {
                 if (!alternateRead) throw failure
-                transport.postJson(WELFARE_BASE_URL + normalizedPath, body.toString(), retryConnections = true)
+                // Search results require the PC proxy contract (including pageSize).
+                // The official welfare proxy accepts the path but rejects that body.
+                val alternateBase = if (normalizedPath == SEARCH_RESULTS_PATH) COMMENT_BASE_URL else WELFARE_BASE_URL
+                transport.postJson(alternateBase + normalizedPath, body.toString(), retryConnections = true)
             }
             val raw = response.body
             if (response.code !in 200..299) {
@@ -56,8 +59,9 @@ class LightNovelApi internal constructor(
         const val WEB_BFF_BASE_URL = "https://www.lightnovel.fun/api/pc-proxy/"
         const val COMMENT_BASE_URL = "https://api.lightnovel.fun/pc-comment-proxy/"
         const val WELFARE_BASE_URL = "https://api.lightnovel.fun/proxy/"
+        private const val SEARCH_RESULTS_PATH = "api/bff/apk-search-result-v1"
         private val ENVELOPE_KEYS = setOf("code", "message", "msg", "t")
-        // Both official proxy domains carry these read APIs. Only a connection
+        // Read APIs have endpoint-specific alternate proxies. Only a transport
         // failure can switch domains; business errors and mutations never do.
         private val ALTERNATE_HOST_READ_PATHS = setOf(
             "api/bff/home-feed-v1",
@@ -67,7 +71,7 @@ class LightNovelApi internal constructor(
             "api/bff/home-recent-updates-feed-v1",
             "api/bff/book-rank-list-v1",
             "api/bff/apk-search-taxonomy-v1",
-            "api/bff/apk-search-result-v1",
+            SEARCH_RESULTS_PATH,
             "api/bff/my-home-v1",
             "api/bff/bookshelf-v1",
             "api/bff/reader-bootstrap-v1",

@@ -57,6 +57,29 @@ class WelfareTransportTest {
         assertTrue(transport.retries)
     }
 
+    @Test fun `search result fallback uses validated PC proxy rather than welfare proxy`() = runTest {
+        val transport = RecordingTransport().apply { failWeb = true }
+        val body = jsonBody("q" to "败犬女主", "page" to 0, "pageSize" to 20)
+        LightNovelApi(transport).post("api/bff/apk-search-result-v1", body)
+        assertEquals(listOf(
+            LightNovelApi.WEB_BFF_BASE_URL + "api/bff/apk-search-result-v1",
+            LightNovelApi.COMMENT_BASE_URL + "api/bff/apk-search-result-v1",
+        ), transport.urls)
+        assertEquals(body.toString(), transport.body)
+        assertTrue(transport.retries)
+    }
+
+    @Test fun `search result business error never switches proxy`() = runTest {
+        val transport = RecordingTransport().apply { businessCode = 3 }
+        try {
+            LightNovelApi(transport).post("api/bff/apk-search-result-v1", jsonBody("pageSize" to 20))
+            fail("expected business error")
+        } catch (e: ApiException) {
+            assertEquals(3, e.businessCode)
+        }
+        assertEquals(listOf(LightNovelApi.WEB_BFF_BASE_URL + "api/bff/apk-search-result-v1"), transport.urls)
+    }
+
     @Test fun `mutation never switches to an alternate domain`() = runTest {
         val transport = RecordingTransport().apply { failWeb = true }
         try {

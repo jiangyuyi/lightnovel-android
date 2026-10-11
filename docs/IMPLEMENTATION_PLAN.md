@@ -103,7 +103,7 @@ Book（书籍）
 - Kotlin、Jetpack Compose、Material 3。
 - 单 Activity + Navigation Compose。
 - Coroutines + Flow；ViewModel 管理 UI 状态。
-- 嵌入式 Cronet（HTTP/3/QUIC）+ Kotlinx Serialization；在部分大陆线路重置 TCP/TLS 时重建引擎并轮换备用 CDN 边缘地址。
+- 嵌入式 Cronet（HTTP/3/QUIC）+ Kotlinx Serialization；目前跟随系统 DNS 与当前 CDN，连接失败时有限尝试传输协议及经验证的只读备用代理，不固定 CDN IP。实际排障记录见 [网络与 CDN 排障](NETWORK_CDN.md)。
 - Coil 加载网络图片。
 - DataStore 保存普通阅读设置；Android Keystore 支持的加密存储保存 `security_key` 和 `uid`。
 - 最低 Android 8.0（API 26），目标 SDK 35；Java 17。
