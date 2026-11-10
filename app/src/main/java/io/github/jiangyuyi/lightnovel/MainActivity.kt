@@ -27,6 +27,8 @@ import androidx.navigation.navArgument
 import androidx.navigation.NavType
 import io.github.jiangyuyi.lightnovel.core.ui.LightNovelTheme
 import io.github.jiangyuyi.lightnovel.core.ui.viewModelFactory
+import io.github.jiangyuyi.lightnovel.core.ui.pageEnterTransition
+import io.github.jiangyuyi.lightnovel.core.ui.pageExitTransition
 import io.github.jiangyuyi.lightnovel.feature.app.AppViewModel
 import io.github.jiangyuyi.lightnovel.feature.auth.AuthScreen
 import io.github.jiangyuyi.lightnovel.feature.auth.AuthViewModel
@@ -125,6 +127,10 @@ private fun LightNovelApp() {
             navController = navController,
             startDestination = Routes.DISCOVER,
             modifier = Modifier.padding(if (currentRoute == Routes.READER) PaddingValues(0.dp) else padding),
+            enterTransition = { pageEnterTransition(isPop = false) },
+            exitTransition = { pageExitTransition(isPop = false) },
+            popEnterTransition = { pageEnterTransition(isPop = true) },
+            popExitTransition = { pageExitTransition(isPop = true) },
         ) {
             composable(Routes.DISCOVER) {
                 val vm: DiscoverViewModel = viewModel(factory = viewModelFactory { DiscoverViewModel(container.repository) })
@@ -269,6 +275,8 @@ private fun LightNovelApp() {
 }
 
 private fun NavHostController.openRoot(route: String) {
+    // Re-selecting the active tab must not rebuild its stack or restart its animation.
+    if (currentDestination?.route == route) return
     navigate(route) {
         popUpTo(graph.findStartDestination().id) { saveState = true }
         launchSingleTop = true
